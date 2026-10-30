@@ -433,6 +433,17 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 fig_fav.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig_fav, use_container_width=True)
 
+            st.markdown("---")
+            st.subheader("⚠️ Peringkat Dosen Tidak Disukai Mahasiswa")
+            all_not_fav = [d for sublist in df_view["Dosen Kurang Disukai"] for d in sublist]
+            if all_not_fav:
+                df_not_fav = pd.DataFrame(all_not_fav, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
+                fig_not_fav = px.bar(df_not_fav, x="Dosen", y="Jumlah Suara", color="Jumlah Suara", title="Jumlah Suara Dosen Tidak Disukai")
+                fig_not_fav.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig_not_fav, use_container_width=True)
+            else:
+                st.info("Belum ada mahasiswa yang menandai dosen tidak disukai untuk filter ini.")
+
             # Tabulasi Pembelajaran GMeet
             col1, col2 = st.columns(2)
             with col1:
