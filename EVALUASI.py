@@ -1,3 +1,4 @@
+import json
 import os
 from io import BytesIO
 
@@ -162,9 +163,50 @@ OPSI_METODE = [
     "Sering Tidak Masuk Dan Tidak Memberikan Materi"
 ]
 
+DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
+
+
+def load_respon_evaluasi():
+    if not os.path.exists(DATA_EVALUASI_FILE):
+        return []
+
+    try:
+        df = pd.read_csv(DATA_EVALUASI_FILE)
+        if df.empty:
+            return []
+
+        records = df.to_dict(orient="records")
+        for row in records:
+            for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
+                value = row.get(key)
+                if isinstance(value, str):
+                    try:
+                        row[key] = json.loads(value)
+                    except (TypeError, ValueError):
+                        row[key] = value
+        return records
+    except Exception:
+        return []
+
+
+def simpan_respon_evaluasi(data_list):
+    if not data_list:
+        return
+
+    rows_to_save = []
+    for row in data_list:
+        prepared = row.copy()
+        for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
+            if key in prepared and prepared[key] is not None:
+                prepared[key] = json.dumps(prepared[key])
+        rows_to_save.append(prepared)
+
+    pd.DataFrame(rows_to_save).to_csv(DATA_EVALUASI_FILE, index=False)
+
+
 # Inisialisasi Session State
 if "respon_evaluasi" not in st.session_state:
-    st.session_state["respon_evaluasi"] = []
+    st.session_state["respon_evaluasi"] = load_respon_evaluasi()
 
 if "admin_logged_in" not in st.session_state:
     st.session_state["admin_logged_in"] = False
@@ -335,6 +377,7 @@ if mode == "Form Evaluasi Mahasiswa":
                     "Catatan Permasalahan": permasalahan_dosen
                 }
                 st.session_state["respon_evaluasi"].append(data_respon)
+                simpan_respon_evaluasi(st.session_state["respon_evaluasi"])
                 st.success(" Respon Anda berhasil dikirim. Terima kasih atas partisipasinya!")
 
 # ==========================================
