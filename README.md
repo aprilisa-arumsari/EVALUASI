@@ -16,7 +16,13 @@ streamlit run EVALUASI.py
 ```
 
 ## Admin Login
-Password default: `aprilcantik`
+Atur password admin di environment variable berikut:
+
+```bash
+set ADMIN_PASSWORD=your_password
+```
+
+Untuk Streamlit Cloud, tambahkan secret dengan nama `ADMIN_PASSWORD` di panel Secrets.
 
 ## Akses
 Buka URL yang ditampilkan oleh Streamlit, biasanya:
