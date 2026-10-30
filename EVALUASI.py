@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -10,7 +12,7 @@ st.set_page_config(
 )
 
 # Password Admin
-PASSWORD_ADMIN = "aprilcantik"
+PASSWORD_ADMIN = os.getenv("ADMIN_PASSWORD", "aprilcantik")
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
 DATA_KELAS_JADWAL = {
