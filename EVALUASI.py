@@ -1,8 +1,12 @@
 import os
+from io import BytesIO
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 # Config Halaman
 st.set_page_config(
@@ -164,6 +168,78 @@ if "respon_evaluasi" not in st.session_state:
 
 if "admin_logged_in" not in st.session_state:
     st.session_state["admin_logged_in"] = False
+
+def _safe_text(value):
+    if value is None or pd.isna(value):
+        return "-"
+    return str(value)
+
+
+def generate_pdf_laporan_kelas(df_view, kelas_label):
+    if df_view.empty:
+        return b""
+
+    styles = getSampleStyleSheet()
+    buffer = BytesIO()
+    pdf = SimpleDocTemplate(buffer, pagesize=A4)
+
+    story = []
+    story.append(Paragraph(f"Laporan Evaluasi Pembelajaran\n{kelas_label}", styles["Title"]))
+    story.append(Spacer(1, 18))
+    story.append(Paragraph(f"Jumlah Respon: {len(df_view)}", styles["BodyText"]))
+    story.append(Spacer(1, 12))
+
+    method_rows = []
+    method_rows.append(["Metode Pembelajaran", "Jumlah"])
+    for _, row in df_view.iterrows():
+        for matkul, metode in row["Metode Pembelajaran"].items():
+            method_rows.append([f"{matkul}", _safe_text(metode)])
+
+    method_summary = pd.DataFrame(method_rows[1:], columns=["Matakuliah", "Metode"]) if len(method_rows) > 1 else pd.DataFrame(columns=["Matakuliah", "Metode"])
+    if not method_summary.empty:
+        method_counts = method_summary["Metode"].value_counts().reset_index()
+        method_counts.columns = ["Metode Pembelajaran", "Jumlah"]
+        method_table = [["Metode Pembelajaran", "Jumlah"]]
+        for _, item in method_counts.iterrows():
+            method_table.append([_safe_text(item["Metode Pembelajaran"]), _safe_text(item["Jumlah"])])
+        story.append(Paragraph("1. Distribusi Metode Pembelajaran", styles["Heading2"]))
+        story.append(Table(method_table, colWidths=[260, 100]))
+        story.append(Spacer(1, 12))
+
+    favorite_list = []
+    for dosen_list in df_view["Dosen Favorit"]:
+        favorite_list.extend(dosen_list)
+    if favorite_list:
+        favorite_counts = pd.DataFrame(favorite_list, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
+        favorite_table = [["Dosen", "Jumlah Suara"]]
+        for _, item in favorite_counts.iterrows():
+            favorite_table.append([_safe_text(item["Dosen"]), _safe_text(item["Jumlah Suara"])])
+        story.append(Paragraph("2. Dosen Favorit Mahasiswa", styles["Heading2"]))
+        story.append(Table(favorite_table, colWidths=[260, 100]))
+        story.append(Spacer(1, 12))
+
+    komentar_rows = []
+    for _, row in df_view.iterrows():
+        if row["Harapan Semester Depan"]:
+            komentar_rows.append(f"- Harapan: {_safe_text(row['Harapan Semester Depan'])}")
+        if row["Catatan Permasalahan"]:
+            komentar_rows.append(f"- Permasalahan: {_safe_text(row['Catatan Permasalahan'])}")
+
+    story.append(Paragraph("3. Harapan dan Permasalahan Mahasiswa", styles["Heading2"]))
+    if komentar_rows:
+        for entry in komentar_rows:
+            story.append(Paragraph(entry, styles["BodyText"]))
+    else:
+        story.append(Paragraph("Tidak ada catatan tambahan.", styles["BodyText"]))
+
+    try:
+        pdf.build(story)
+    except Exception:
+        story.append(Paragraph("Laporan ini dibuat berdasarkan data evaluasi yang tersedia.", styles["BodyText"]))
+        pdf.build(story)
+
+    return buffer.getvalue()
+
 
 # Navigation Sidebar
 st.sidebar.title("📌 Menu Navigasi")
@@ -346,3 +422,18 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 file_name="Laporan_Hasil_Evaluasi_Pembelajaran_UDBS.csv",
                 mime="text/csv"
             )
+
+            st.markdown("---")
+            st.subheader("📄 Download PDF Per Kelas")
+            nama_kelas_pdf = kelas_filter if kelas_filter != "Semua Kelas" else "Semua_Kelas"
+            pdf_file_name = f"Laporan_Evaluasi_{nama_kelas_pdf}.pdf"
+            pdf_bytes = generate_pdf_laporan_kelas(df_view, kelas_filter if kelas_filter != "Semua Kelas" else "Semua Kelas")
+            if pdf_bytes:
+                st.download_button(
+                    label="Download Laporan PDF",
+                    data=pdf_bytes,
+                    file_name=pdf_file_name,
+                    mime="application/pdf"
+                )
+            else:
+                st.warning("Data evaluasi belum cukup untuk membuat laporan PDF.")
