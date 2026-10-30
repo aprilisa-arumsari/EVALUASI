@@ -461,11 +461,13 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                     st.dataframe(df_nogm, use_container_width=True)
 
             st.markdown("---")
-            st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa")
-            st.dataframe(
-                df_view[["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]], 
-                use_container_width=True
-            )
+            st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa per Kelas")
+            kelas_komentar = st.selectbox("Pilih Kelas untuk Lihat Komentar:", ["Semua Kelas"] + list(DATA_KELAS_JADWAL.keys()))
+            if kelas_komentar != "Semua Kelas":
+                df_komentar = df_respon[df_respon["Kelas"] == kelas_komentar][["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]]
+            else:
+                df_komentar = df_respon[["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]]
+            st.dataframe(df_komentar, use_container_width=True)
 
             # Unduh CSV
             st.subheader("📥 Export Laporan Evaluasi")
