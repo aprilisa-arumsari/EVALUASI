@@ -1,10 +1,6 @@
-import base64
 import json
 import os
 from io import BytesIO
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
 
 import streamlit as st
 import pandas as pd
@@ -167,218 +163,50 @@ OPSI_METODE = [
     "Sering Tidak Masuk Dan Tidak Memberikan Materi"
 ]
 
-DATA_EVALUASI_FILE = st.secrets.get("GITHUB_DATA_FILE") or os.getenv(
-    "GITHUB_DATA_FILE", "data_evaluasi.csv"
-)
-
-
-def _github_config():
-    token = st.secrets.get("GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN", "")
-    repository = st.secrets.get("GITHUB_REPOSITORY") or os.getenv(
-        "GITHUB_REPOSITORY", ""
-    )
-    branch = st.secrets.get("GITHUB_BRANCH") or os.getenv("GITHUB_BRANCH", "main")
-
-    if not token:
-        raise RuntimeError("GITHUB_TOKEN belum diatur di Streamlit Secrets.")
-    if not repository or repository.count("/") != 1:
-        raise RuntimeError(
-            "GITHUB_REPOSITORY harus berisi owner/nama-repository private."
-        )
-    if not DATA_EVALUASI_FILE or DATA_EVALUASI_FILE.startswith("/") or ".." in DATA_EVALUASI_FILE.split("/"):
-        raise RuntimeError("GITHUB_DATA_FILE harus berupa path file di dalam repository.")
-
-    return token, repository, branch
-
-
-def _github_api_request(method, endpoint, payload=None, query=None, allow_not_found=False):
-    token, repository, _ = _github_config()
-    url = f"https://api.github.com/repos/{quote(repository, safe='/')}"
-    if endpoint:
-        url = f"{url}/{endpoint.lstrip('/')}"
-    if query:
-        url = f"{url}?{urlencode(query)}"
-
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "EVALUASI-Streamlit-App",
-    }
-    body = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = Request(url, data=body, headers=headers, method=method)
-
-    try:
-        with urlopen(request, timeout=20) as response:
-            response_body = response.read()
-    except HTTPError as error:
-        if allow_not_found and error.code == 404:
-            return None
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"GitHub API mengembalikan HTTP {error.code}: {detail}"
-        ) from error
-    except URLError as error:
-        raise RuntimeError(f"Tidak dapat terhubung ke GitHub: {error.reason}") from error
-
-    return json.loads(response_body.decode("utf-8")) if response_body else {}
-
-
-def _assert_private_data_repository():
-    _, repository, _ = _github_config()
-    repository_info = _github_api_request("GET", "")
-    if not repository_info.get("private"):
-        raise RuntimeError(
-            f"Repository {repository} bersifat publik. Buat repository private "
-            "khusus data respon sebelum mengaktifkan penyimpanan."
-        )
-
-
-def _read_github_responses():
-    _, _, branch = _github_config()
-    _assert_private_data_repository()
-    file_path = quote(DATA_EVALUASI_FILE, safe="/")
-    file_data = _github_api_request(
-        "GET",
-        f"contents/{file_path}",
-        query={"ref": branch},
-        allow_not_found=True,
-    )
-    if file_data is None:
-        return [], None
-    if file_data.get("encoding") != "base64":
-        raise RuntimeError("Format file respon dari GitHub tidak dikenali.")
-
-    try:
-        encoded_content = "".join(file_data["content"].split())
-        csv_content = base64.b64decode(encoded_content, validate=True)
-        df = pd.read_csv(BytesIO(csv_content))
-    except (KeyError, ValueError, UnicodeDecodeError, pd.errors.EmptyDataError, pd.errors.ParserError) as error:
-        raise RuntimeError(f"Gagal membaca {DATA_EVALUASI_FILE} dari GitHub: {error}") from error
-
-    records = df.to_dict(orient="records")
-    for row in records:
-        for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
-            value = row.get(key)
-            if isinstance(value, str):
-                try:
-                    row[key] = json.loads(value)
-                except (TypeError, ValueError):
-                    row[key] = value
-    return records, file_data.get("sha")
+DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
 
 
 def load_respon_evaluasi():
-    records, _ = _read_github_responses()
-    return records
+    if not os.path.exists(DATA_EVALUASI_FILE):
+        return []
+
+    try:
+        df = pd.read_csv(DATA_EVALUASI_FILE)
+        if df.empty:
+            return []
+
+        records = df.to_dict(orient="records")
+        for row in records:
+            for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
+                value = row.get(key)
+                if isinstance(value, str):
+                    try:
+                        row[key] = json.loads(value)
+                    except (TypeError, ValueError):
+                        row[key] = value
+        return records
+    except Exception:
+        return []
 
 
-def _write_github_responses(records, file_sha, commit_message):
-    _, _, branch = _github_config()
+def simpan_respon_evaluasi(data_list):
+    if not data_list:
+        return
+
     rows_to_save = []
-    for row in records:
+    for row in data_list:
         prepared = row.copy()
         for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
             if key in prepared and prepared[key] is not None:
                 prepared[key] = json.dumps(prepared[key])
         rows_to_save.append(prepared)
 
-    csv_content = pd.DataFrame(rows_to_save).to_csv(index=False).encode("utf-8")
-    payload = {
-        "message": commit_message,
-        "content": base64.b64encode(csv_content).decode("ascii"),
-        "branch": branch,
-    }
-    if file_sha:
-        payload["sha"] = file_sha
-
-    file_path = quote(DATA_EVALUASI_FILE, safe="/")
-    _github_api_request("PUT", f"contents/{file_path}", payload=payload)
-
-
-def simpan_respon_evaluasi(data_respon):
-    records, file_sha = _read_github_responses()
-    records.append(data_respon)
-    _write_github_responses(records, file_sha, "Save evaluation response")
-    return records
-
-
-def pulihkan_arsip_csv(uploaded_file):
-    records, file_sha = _read_github_responses()
-    if records:
-        raise RuntimeError(
-            "Pemulihan dibatalkan karena repository data sudah berisi respon."
-        )
-
-    required_columns = {
-        "Timestamp",
-        "Kelas",
-        "Harapan Semester Depan",
-        "Catatan Permasalahan",
-    }
-    try:
-        archive_df = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
-    except (UnicodeDecodeError, pd.errors.EmptyDataError, pd.errors.ParserError) as error:
-        raise RuntimeError(f"CSV arsip tidak dapat dibaca: {error}") from error
-
-    missing_columns = required_columns.difference(archive_df.columns)
-    if missing_columns:
-        raise RuntimeError(
-            "CSV arsip tidak memiliki kolom wajib: "
-            + ", ".join(sorted(missing_columns))
-        )
-
-    archive_df = archive_df.loc[
-        ~archive_df.apply(
-            lambda row: all(not value.strip() for value in row), axis=1
-        )
-    ]
-    restored_records = []
-    for row_number, row in enumerate(archive_df.to_dict(orient="records"), start=2):
-        kelas = row["Kelas"].strip()
-        timestamp = row["Timestamp"].strip()
-        if not kelas or not timestamp:
-            raise RuntimeError(
-                f"Baris {row_number} CSV harus memiliki Timestamp dan Kelas."
-            )
-        if kelas not in DATA_KELAS_JADWAL:
-            raise RuntimeError(
-                f"Baris {row_number} CSV berisi kelas yang tidak dikenal: {kelas}."
-            )
-
-        restored_records.append(
-            {
-                "Timestamp": timestamp,
-                "Kelas": kelas,
-                "Metode Pembelajaran": {},
-                "Dosen GMeet Selalu": [],
-                "Dosen GMeet Tidak Pernah": [],
-                "Dosen Favorit": [],
-                "Dosen Kurang Disukai": [],
-                "Harapan Semester Depan": row["Harapan Semester Depan"],
-                "Catatan Permasalahan": row["Catatan Permasalahan"],
-                "Kelengkapan Data": "Arsip parsial: hanya komentar dan identitas respon",
-            }
-        )
-
-    if not restored_records:
-        raise RuntimeError("CSV arsip tidak berisi baris respon.")
-
-    _write_github_responses(
-        restored_records,
-        file_sha,
-        f"Restore {len(restored_records)} partial evaluation responses",
-    )
-    return restored_records
+    pd.DataFrame(rows_to_save).to_csv(DATA_EVALUASI_FILE, index=False)
 
 
 # Inisialisasi Session State
 if "respon_evaluasi" not in st.session_state:
-    try:
-        st.session_state["respon_evaluasi"] = load_respon_evaluasi()
-    except RuntimeError as error:
-        st.error(f"Penyimpanan GitHub belum siap: {error}")
-        st.stop()
+    st.session_state["respon_evaluasi"] = load_respon_evaluasi()
 
 if "admin_logged_in" not in st.session_state:
     st.session_state["admin_logged_in"] = False
@@ -476,7 +304,7 @@ if mode == "Form Evaluasi Mahasiswa":
     list_matkul = DATA_KELAS_JADWAL[kelas_terpilih]
     list_dosen_label = [f"{m['matkul']} ({m['dosen']})" for m in list_matkul]
 
-    with st.form("form_evaluasi_pembelajaran", clear_on_submit=False):
+    with st.form("form_evaluasi_pembelajaran", clear_on_submit=True):
         st.markdown("### A. Metode Pembelajaran Dosen Pengampu")
         
         jawaban_metode = {}
@@ -548,13 +376,9 @@ if mode == "Form Evaluasi Mahasiswa":
                     "Harapan Semester Depan": harapan_satu_semester,
                     "Catatan Permasalahan": permasalahan_dosen
                 }
-                try:
-                    respon_tersimpan = simpan_respon_evaluasi(data_respon)
-                except RuntimeError as error:
-                    st.error(f"Respon belum tersimpan ke GitHub: {error}")
-                else:
-                    st.session_state["respon_evaluasi"] = respon_tersimpan
-                    st.success("Respon berhasil disimpan. Terima kasih atas partisipasinya!")
+                st.session_state["respon_evaluasi"].append(data_respon)
+                simpan_respon_evaluasi(st.session_state["respon_evaluasi"])
+                st.success(" Respon Anda berhasil dikirim. Terima kasih atas partisipasinya!")
 
 # ==========================================
 # 2. DASHBOARD LAPORAN PRODI (KHUSUS ADMIN)
@@ -583,40 +407,10 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
         st.success(" Kredensial Terverifikasi. Selamat Datang Admin.")
         st.markdown("---")
         
-        if st.button("Muat Ulang Respon dari File"):
-            try:
-                respon_tersimpan = load_respon_evaluasi()
-            except RuntimeError as error:
-                st.error(f"Gagal memuat ulang respon dari GitHub: {error}")
-            else:
-                st.session_state["respon_evaluasi"] = respon_tersimpan
-                st.success(f"{len(respon_tersimpan)} respon berhasil dimuat ulang.")
-
         respon_list = st.session_state["respon_evaluasi"]
         
         if not respon_list:
             st.info("Belum ada respon evaluasi yang masuk dari mahasiswa.")
-            st.markdown(
-                "Jika Anda memiliki CSV ekspor sebelumnya, Anda dapat memulihkan "
-                "kolom komentar yang tersedia. Jawaban lain yang tidak ada di CSV "
-                "tidak akan dibuat ulang."
-            )
-            arsip_csv = st.file_uploader(
-                "Pilih CSV arsip respon",
-                type=["csv"],
-                key="arsip_respon_csv",
-            )
-            if arsip_csv and st.button("Pulihkan CSV ke GitHub", type="primary"):
-                try:
-                    respon_pulihan = pulihkan_arsip_csv(arsip_csv)
-                except RuntimeError as error:
-                    st.error(f"Pemulihan gagal: {error}")
-                else:
-                    st.session_state["respon_evaluasi"] = respon_pulihan
-                    st.success(
-                        f"{len(respon_pulihan)} respon parsial berhasil disimpan."
-                    )
-                    st.rerun()
         else:
             df_respon = pd.DataFrame(respon_list)
             
