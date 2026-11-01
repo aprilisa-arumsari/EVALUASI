@@ -167,17 +167,17 @@ OPSI_METODE = [
     "Sering Tidak Masuk Dan Tidak Memberikan Materi"
 ]
 
-DATA_EVALUASI_FILE = os.getenv("GITHUB_DATA_FILE") or st.secrets.get(
+DATA_EVALUASI_FILE = st.secrets.get("GITHUB_DATA_FILE") or os.getenv(
     "GITHUB_DATA_FILE", "data_evaluasi.csv"
 )
 
 
 def _github_config():
-    token = os.getenv("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
-    repository = os.getenv("GITHUB_REPOSITORY") or st.secrets.get(
+    token = st.secrets.get("GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN", "")
+    repository = st.secrets.get("GITHUB_REPOSITORY") or os.getenv(
         "GITHUB_REPOSITORY", ""
     )
-    branch = os.getenv("GITHUB_BRANCH") or st.secrets.get("GITHUB_BRANCH", "main")
+    branch = st.secrets.get("GITHUB_BRANCH") or os.getenv("GITHUB_BRANCH", "main")
 
     if not token:
         raise RuntimeError("GITHUB_TOKEN belum diatur di Streamlit Secrets.")
