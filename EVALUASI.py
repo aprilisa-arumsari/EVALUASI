@@ -5,6 +5,7 @@ import re
 from xml.sax.saxutils import escape
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import plotly.express as px
 from reportlab.lib.pagesizes import A4, landscape
@@ -18,8 +19,21 @@ st.set_page_config(
     layout="wide"
 )
 
-# Password Admin
-PASSWORD_ADMIN = os.getenv("ADMIN_PASSWORD") or st.secrets.get("ADMIN_PASSWORD", "aprilcantik")
+def _ambil_password_admin():
+    password = os.getenv("ADMIN_PASSWORD")
+    if password:
+        return password
+
+    try:
+        return st.secrets["ADMIN_PASSWORD"]
+    except (KeyError, StreamlitSecretNotFoundError):
+        return None
+
+
+PASSWORD_ADMIN = _ambil_password_admin()
+if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
+    st.error("ADMIN_PASSWORD harus terdiri dari minimal 16 karakter.")
+    st.stop()
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
 DATA_KELAS_JADWAL = {
@@ -166,6 +180,13 @@ OPSI_METODE = [
 ]
 
 DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
+KOLOM_JSON_REPON = [
+    "Metode Pembelajaran",
+    "Dosen GMeet Selalu",
+    "Dosen GMeet Tidak Pernah",
+    "Dosen Favorit",
+    "Dosen Kurang Disukai",
+]
 
 
 def load_respon_evaluasi():
@@ -179,7 +200,7 @@ def load_respon_evaluasi():
 
         records = df.to_dict(orient="records")
         for row in records:
-            for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
+            for key in KOLOM_JSON_REPON:
                 value = row.get(key)
                 if isinstance(value, str):
                     try:
@@ -187,22 +208,27 @@ def load_respon_evaluasi():
                     except (TypeError, ValueError):
                         row[key] = value
         return records
-    except Exception:
-        return []
+    except (OSError, pd.errors.ParserError, UnicodeDecodeError) as error:
+        st.error(f"Gagal membaca data evaluasi dari {DATA_EVALUASI_FILE}: {error}")
+        st.stop()
+
+
+def _siapkan_respon_untuk_csv(data_list):
+    rows_to_save = []
+    for row in data_list:
+        prepared = row.copy()
+        for key in KOLOM_JSON_REPON:
+            if key in prepared and prepared[key] is not None:
+                prepared[key] = json.dumps(prepared[key], ensure_ascii=False)
+        rows_to_save.append(prepared)
+    return rows_to_save
 
 
 def simpan_respon_evaluasi(data_list):
     if not data_list:
         return
 
-    rows_to_save = []
-    for row in data_list:
-        prepared = row.copy()
-        for key in ["Metode Pembelajaran", "Dosen GMeet Selalu", "Dosen GMeet Tidak Pernah", "Dosen Favorit", "Dosen Kurang Disukai"]:
-            if key in prepared and prepared[key] is not None:
-                prepared[key] = json.dumps(prepared[key])
-        rows_to_save.append(prepared)
-
+    rows_to_save = _siapkan_respon_untuk_csv(data_list)
     pd.DataFrame(rows_to_save).to_csv(DATA_EVALUASI_FILE, index=False)
 
 
@@ -258,10 +284,16 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
     story = []
     story.append(
         Paragraph(
-            f"Laporan Evaluasi Pembelajaran<br/>{escape(angkatan_label)}",
+            "Laporan Evaluasi Pembelajaran<br/>"
+            "Program Studi S1 Sistem Informasi<br/>"
+            "Tahun Akademik 2026/2027 Ganjil",
             styles["Title"],
         )
     )
+    if angkatan_label != "Semua Angkatan":
+        story.append(
+            Paragraph(f"Angkatan: {escape(angkatan_label)}", styles["BodyText"])
+        )
     story.append(Spacer(1, 10))
     story.append(
         Paragraph(
@@ -331,33 +363,41 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
         story.append(Spacer(1, 12))
 
     story.append(Paragraph("7. Harapan dan Permasalahan Mahasiswa", styles["Heading2"]))
-    has_comments = False
-    for _, row in df_view.iterrows():
-        harapan = _safe_text(row["Harapan Semester Depan"])
-        masalah = _safe_text(row["Catatan Permasalahan"])
+    for kelas, kelas_df in df_view.groupby("Kelas", sort=True):
         story.append(
-            Paragraph(
-                f"{escape(_safe_text(row['Timestamp']))} — "
-                f"{escape(_safe_text(row['Kelas']))}",
-                styles["Heading3"],
-            )
+            Paragraph(f"Kelas {escape(str(kelas))}", styles["Heading3"])
         )
-        story.append(
-            Paragraph(
-                f"<b>Harapan:</b> {escape(harapan).replace(chr(10), '<br/>')}",
-                styles["BodyText"],
+        comment_rows = [["Harapan Mahasiswa", "Permasalahan Mahasiswa"]]
+        for _, row in kelas_df.iterrows():
+            harapan = _safe_text(row["Harapan Semester Depan"]).strip()
+            masalah = _safe_text(row["Catatan Permasalahan"]).strip()
+            if harapan == "-" or not harapan:
+                harapan = "-"
+            if masalah == "-" or not masalah:
+                masalah = "-"
+            if harapan == "-" and masalah == "-":
+                continue
+
+            comment_rows.append(
+                [
+                    Paragraph(
+                        escape(harapan).replace(chr(10), "<br/>"),
+                        styles["BodyText"],
+                    ),
+                    Paragraph(
+                        escape(masalah).replace(chr(10), "<br/>"),
+                        styles["BodyText"],
+                    ),
+                ]
             )
-        )
-        story.append(
-            Paragraph(
-                f"<b>Permasalahan:</b> {escape(masalah).replace(chr(10), '<br/>')}",
-                styles["BodyText"],
+
+        if len(comment_rows) > 1:
+            story.append(_tabel_pdf(comment_rows, [340, 340]))
+        else:
+            story.append(
+                Paragraph("Tidak ada catatan tambahan.", styles["BodyText"])
             )
-        )
-        story.append(Spacer(1, 6))
-        has_comments = has_comments or harapan != "-" or masalah != "-"
-    if not has_comments:
-        story.append(Paragraph("Tidak ada catatan tambahan.", styles["BodyText"]))
+        story.append(Spacer(1, 8))
 
     pdf.build(story)
 
@@ -469,15 +509,21 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
     # Autentikasi Password Admin
     if not st.session_state["admin_logged_in"]:
-        col_pass, col_btn = st.columns([3, 1])
-        input_password = col_pass.text_input("Masukkan Password Admin:", type="password", placeholder="Password...")
-        
-        if col_btn.button(" Login"):
-            if input_password == PASSWORD_ADMIN:
-                st.session_state["admin_logged_in"] = True
-                st.rerun()
-            else:
-                st.error("Password salah! Silakan coba lagi.")
+        if not PASSWORD_ADMIN:
+            st.error(
+                "Login admin belum aktif. Admin harus mengatur ADMIN_PASSWORD "
+                "melalui Streamlit Secrets atau environment variable."
+            )
+        else:
+            col_pass, col_btn = st.columns([3, 1])
+            input_password = col_pass.text_input("Masukkan Password Admin:", type="password", placeholder="Password...")
+
+            if col_btn.button(" Login"):
+                if input_password == PASSWORD_ADMIN:
+                    st.session_state["admin_logged_in"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah! Silakan coba lagi.")
         st.info("ℹ️ Dashboard ini khusus untuk Kaprodi / Tim Penjaminan Mutu Program Studi.")
     else:
         # Tombol Logout Admin
@@ -716,6 +762,28 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 data=csv_bytes,
                 file_name="Laporan_Hasil_Evaluasi_Pembelajaran_UDBS.csv",
                 mime="text/csv"
+            )
+
+            st.markdown("#### Cadangan Data Lengkap")
+            st.warning(
+                "Data aplikasi disimpan di file lokal dan bisa hilang saat aplikasi "
+                "di-restart atau diperbarui. Unduh cadangan minimal setiap hari saat "
+                "survei aktif dan sebelum aplikasi diperbarui, simpan "
+                "di lokasi pribadi yang aksesnya terbatas, dan jangan hanya menyimpan "
+                "salinannya di perangkat yang sama."
+            )
+            cadangan_csv = (
+                pd.DataFrame(_siapkan_respon_untuk_csv(respon_list))
+                .to_csv(index=False)
+                .encode("utf-8-sig")
+            )
+            waktu_cadangan = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                label="Download Cadangan Semua Data (CSV)",
+                data=cadangan_csv,
+                file_name=f"Cadangan_Evaluasi_Lengkap_{waktu_cadangan}.csv",
+                mime="text/csv",
+                help="Mencadangkan semua respon, tidak hanya angkatan yang sedang dipilih.",
             )
 
             st.markdown("---")
