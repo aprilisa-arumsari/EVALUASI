@@ -12,7 +12,6 @@ from google.auth.exceptions import GoogleAuthError
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -45,17 +44,18 @@ if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
     st.error("ADMIN_PASSWORD harus terdiri dari minimal 16 karakter.")
     st.stop()
 
-GOOGLE_DRIVE_FOLDER_ID = "1PQ1Ri52PYbGAlMlKMr0Q0Vad2kEDEL4K"
-GOOGLE_DRIVE_FILE_NAME = "data_evaluasi.csv"
-GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
-GOOGLE_DRIVE_LOCK = threading.Lock()
+GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
+GOOGLE_SHEETS_TAB = "Respon"
+GOOGLE_SHEETS_RANGE = f"'{GOOGLE_SHEETS_TAB}'!A1:I"
+GOOGLE_SHEETS_LOCK = threading.Lock()
 
 
-def _ambil_konfigurasi_google_drive():
+def _ambil_konfigurasi_google_sheets():
     try:
-        config = st.secrets["google_drive"]
+        config = st.secrets["google_sheets"]
         service_account_json = config["service_account_json"]
         credentials_info = json.loads(service_account_json)
+        spreadsheet_id = str(config["spreadsheet_id"]).strip()
     except (
         KeyError,
         StreamlitSecretNotFoundError,
@@ -63,29 +63,40 @@ def _ambil_konfigurasi_google_drive():
         json.JSONDecodeError,
     ) as error:
         raise RuntimeError(
-            "Atur [google_drive] dan service_account_json di Streamlit Secrets."
+            "Atur [google_sheets], spreadsheet_id, dan service_account_json "
+            "di Streamlit Secrets."
         ) from error
 
     if not isinstance(credentials_info, dict):
         raise RuntimeError("service_account_json harus berupa JSON service account.")
+    spreadsheet_url_match = re.search(
+        r"/spreadsheets/d/([^/?#]+)",
+        spreadsheet_id,
+    )
+    if spreadsheet_url_match:
+        spreadsheet_id = spreadsheet_url_match.group(1)
+    if not spreadsheet_id:
+        raise RuntimeError("spreadsheet_id tidak boleh kosong.")
 
-    return credentials_info
+    return credentials_info, spreadsheet_id
 
 
 try:
-    GOOGLE_DRIVE_CREDENTIALS = _ambil_konfigurasi_google_drive()
+    GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEETS_SPREADSHEET_ID = (
+        _ambil_konfigurasi_google_sheets()
+    )
 except RuntimeError as error:
-    st.error(f"Penyimpanan permanen belum siap: {error}")
+    st.error(f"Penyimpanan Google Sheets belum siap: {error}")
     st.stop()
 
 
 @st.cache_resource
-def _google_drive_service():
+def _google_sheets_service():
     credentials = Credentials.from_service_account_info(
-        GOOGLE_DRIVE_CREDENTIALS,
-        scopes=[GOOGLE_DRIVE_SCOPE],
+        GOOGLE_SHEETS_CREDENTIALS,
+        scopes=[GOOGLE_SHEETS_SCOPE],
     )
-    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
@@ -288,55 +299,73 @@ def _csv_ke_respon(csv_bytes):
     return records
 
 
-def _google_drive_file_id(service):
-    escaped_name = GOOGLE_DRIVE_FILE_NAME.replace("\\", "\\\\").replace("'", "\\'")
-    query = (
-        f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and "
-        f"name = '{escaped_name}' and trashed = false"
-    )
+def _sheet_baris_respon(data_respon):
+    row = []
+    for column in KOLOM_REPON:
+        value = data_respon.get(column, "")
+        if column in KOLOM_JSON_REPON:
+            value = json.dumps(value, ensure_ascii=False)
+        row.append(value)
+    return row
+
+
+def _sheet_ke_respon(values):
+    records = []
+    for values_row in values[1:]:
+        padded_row = values_row + [""] * (len(KOLOM_REPON) - len(values_row))
+        record = dict(zip(KOLOM_REPON, padded_row))
+        for column in KOLOM_JSON_REPON:
+            value = record[column]
+            if not value:
+                record[column] = {} if column == "Metode Pembelajaran" else []
+                continue
+            try:
+                record[column] = json.loads(value)
+            except (TypeError, ValueError) as error:
+                raise RuntimeError(
+                    f"Isi kolom {column} di Google Sheet bukan JSON yang valid."
+                ) from error
+        records.append(record)
+    return records
+
+
+def _muat_respon_sheet(service):
     result = (
-        service.files()
-        .list(
-            q=query,
-            spaces="drive",
-            pageSize=2,
-            fields="files(id,name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
+        service.spreadsheets()
+        .values()
+        .get(
+            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            range=GOOGLE_SHEETS_RANGE,
         )
         .execute()
     )
-    files = result.get("files", [])
-    if len(files) > 1:
+    values = result.get("values", [])
+    if not values:
+        service.spreadsheets().values().update(
+            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            range=f"'{GOOGLE_SHEETS_TAB}'!A1",
+            valueInputOption="RAW",
+            body={"values": [KOLOM_REPON]},
+        ).execute()
+        return []
+
+    if values[0] != KOLOM_REPON:
         raise RuntimeError(
-            "Folder Google Drive berisi lebih dari satu data_evaluasi.csv. "
-            "Hapus atau pindahkan file duplikat."
+            "Header tab Google Sheet harus sama dengan template "
+            "data_evaluasi_template.csv."
         )
-    return files[0]["id"] if files else None
+    return _sheet_ke_respon(values)
 
 
-def _muat_csv_drive(service, file_id):
-    response = (
-        service.files()
-        .get(fileId=file_id, alt="media", supportsAllDrives=True)
-        .execute()
-    )
-    if not isinstance(response, bytes):
-        raise RuntimeError("Google Drive mengembalikan format file yang tidak valid.")
-    return _csv_ke_respon(response)
-
-
-def _unggah_csv_drive(service, data_list, file_id):
-    media = MediaIoBaseUpload(
-        BytesIO(_csv_respon_bytes(data_list)),
-        mimetype="text/csv",
-        resumable=True,
-    )
-    service.files().update(
-        fileId=file_id,
-        media_body=media,
-        fields="id",
-        supportsAllDrives=True,
+def _tambah_respon_sheet(service, data_list):
+    if not data_list:
+        return
+    service.spreadsheets().values().append(
+        spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+        range=f"'{GOOGLE_SHEETS_TAB}'!A:I",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [_sheet_baris_respon(row) for row in data_list]},
     ).execute()
 
 
@@ -348,64 +377,51 @@ def _baca_respon_lokal():
         return _csv_ke_respon(csv_file.read())
 
 
-def _drive_error(error):
+def _google_api_error(error):
     if isinstance(error, HttpError):
         status = getattr(error.resp, "status", "unknown")
         return RuntimeError(
-            f"Google Drive mengembalikan HTTP {status}. Periksa akses folder "
-            "dan service account."
+            f"Google API mengembalikan HTTP {status}. Periksa izin edit pada "
+            "spreadsheet, Google Sheets API, dan service account."
         )
     if isinstance(error, GoogleAuthError):
         return RuntimeError(
-            "Autentikasi Google Drive gagal. Periksa service account di Secrets."
+            "Autentikasi Google gagal. Periksa service account di Secrets."
         )
     return RuntimeError(
-        "Google Drive tidak dapat diakses. Periksa koneksi dan izin folder."
+        "Google Sheets tidak dapat diakses. Periksa koneksi dan konfigurasi."
     )
 
 
 def load_respon_evaluasi():
     try:
-        with GOOGLE_DRIVE_LOCK:
-            service = _google_drive_service()
-            file_id = _google_drive_file_id(service)
-            if not file_id:
-                raise RuntimeError(
-                    "File data_evaluasi.csv belum ada di folder Google Drive. "
-                    "Unggah template CSV terlebih dahulu."
-                )
-
-            records = _muat_csv_drive(service, file_id)
+        with GOOGLE_SHEETS_LOCK:
+            service = _google_sheets_service()
+            records = _muat_respon_sheet(service)
             if not records:
                 local_records = _baca_respon_lokal()
                 if local_records:
-                    _unggah_csv_drive(service, local_records, file_id)
+                    _tambah_respon_sheet(service, local_records)
                     return local_records
             return records
     except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
-        st.error(f"Gagal memuat respon dari Google Drive: {_drive_error(error)}")
+        st.error(
+            f"Gagal memuat respon dari Google Sheets: {_google_api_error(error)}"
+        )
         st.stop()
     except RuntimeError as error:
-        st.error(f"Gagal memuat respon dari Google Drive: {error}")
+        st.error(f"Gagal memuat respon dari Google Sheets: {error}")
         st.stop()
 
 
 def simpan_respon_evaluasi(data_respon):
     try:
-        with GOOGLE_DRIVE_LOCK:
-            service = _google_drive_service()
-            file_id = _google_drive_file_id(service)
-            if not file_id:
-                raise RuntimeError(
-                    "File data_evaluasi.csv belum ada di folder Google Drive. "
-                    "Unggah template CSV terlebih dahulu."
-                )
-
-            records = _muat_csv_drive(service, file_id)
-            records.append(data_respon)
-            _unggah_csv_drive(service, records, file_id)
+        with GOOGLE_SHEETS_LOCK:
+            service = _google_sheets_service()
+            _muat_respon_sheet(service)
+            _tambah_respon_sheet(service, [data_respon])
     except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
-        raise _drive_error(error) from error
+        raise _google_api_error(error) from error
 
 
 # Inisialisasi Session State
@@ -768,7 +784,7 @@ if mode == "Form Evaluasi Mahasiswa":
                     simpan_respon_evaluasi(data_respon)
                 except (RuntimeError, OSError, TypeError, ValueError) as error:
                     st.error(
-                        "Respon belum tersimpan secara permanen ke Google Drive. "
+                        "Respon belum tersimpan secara permanen ke Google Sheets. "
                         f"Periksa koneksi dan konfigurasi, lalu coba kembali. Detail: {error}"
                     )
                 else:
@@ -1115,7 +1131,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             st.markdown("#### Cadangan Data Lengkap")
             st.warning(
-                "Data utama tersimpan di Google Drive. Tetap unduh cadangan secara "
+                "Data utama tersimpan di Google Sheets. Tetap unduh cadangan secara "
                 "berkala dan simpan di lokasi pribadi yang aksesnya dibatasi."
             )
             cadangan_csv = (
