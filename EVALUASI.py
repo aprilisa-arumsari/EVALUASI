@@ -426,19 +426,51 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             # Visualisasi Dosen Favorit
             st.subheader("🏆 Peringkat Dosen Favorit Mahasiswa")
-            all_fav = [d for sublist in df_view["Dosen Favorit"] for d in sublist]
-            if all_fav:
-                df_fav = pd.DataFrame(all_fav, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
-                fig_fav = px.bar(df_fav, x="Dosen", y="Jumlah Suara", color="Jumlah Suara", title="Jumlah Suara Dosen Favorit")
+            fav_rows = [
+                {"Dosen": dosen, "Kelas": row["Kelas"]}
+                for _, row in df_view.iterrows()
+                for dosen in row["Dosen Favorit"]
+            ]
+            if fav_rows:
+                df_fav = (
+                    pd.DataFrame(fav_rows)
+                    .value_counts(["Dosen", "Kelas"])
+                    .reset_index(name="Jumlah Suara")
+                )
+                fig_fav = px.bar(
+                    df_fav,
+                    x="Dosen",
+                    y="Jumlah Suara",
+                    color="Kelas",
+                    barmode="group",
+                    title="Jumlah Suara Dosen Favorit per Kelas",
+                )
                 fig_fav.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig_fav, use_container_width=True)
+            else:
+                st.info("Belum ada suara dosen favorit untuk filter kelas ini.")
 
             st.markdown("---")
             st.subheader("⚠️ Peringkat Dosen Tidak Disukai Mahasiswa")
-            all_not_fav = [d for sublist in df_view["Dosen Kurang Disukai"] for d in sublist]
-            if all_not_fav:
-                df_not_fav = pd.DataFrame(all_not_fav, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
-                fig_not_fav = px.bar(df_not_fav, x="Dosen", y="Jumlah Suara", color="Jumlah Suara", title="Jumlah Suara Dosen Tidak Disukai")
+            not_fav_rows = [
+                {"Dosen": dosen, "Kelas": row["Kelas"]}
+                for _, row in df_view.iterrows()
+                for dosen in row["Dosen Kurang Disukai"]
+            ]
+            if not_fav_rows:
+                df_not_fav = (
+                    pd.DataFrame(not_fav_rows)
+                    .value_counts(["Dosen", "Kelas"])
+                    .reset_index(name="Jumlah Suara")
+                )
+                fig_not_fav = px.bar(
+                    df_not_fav,
+                    x="Dosen",
+                    y="Jumlah Suara",
+                    color="Kelas",
+                    barmode="group",
+                    title="Jumlah Suara Dosen Tidak Disukai per Kelas",
+                )
                 fig_not_fav.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig_not_fav, use_container_width=True)
             else:
