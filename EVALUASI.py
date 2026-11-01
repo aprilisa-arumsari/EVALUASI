@@ -63,6 +63,126 @@ st.markdown(
         padding-bottom: 3rem;
     }
 
+    .app-hero {
+        position: relative;
+        overflow: hidden;
+        margin: 0 0 1.6rem;
+        padding: clamp(1.5rem, 4vw, 2.5rem);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 1.35rem;
+        color: #ffffff;
+        background:
+            radial-gradient(circle at 88% 16%, rgba(255, 255, 255, 0.2), transparent 13rem),
+            linear-gradient(118deg, #17324d 0%, #1d5680 58%, #0f766e 100%);
+        box-shadow: 0 18px 42px rgba(23, 50, 77, 0.16);
+    }
+
+    .app-hero::after {
+        position: absolute;
+        right: -3rem;
+        bottom: -7rem;
+        width: 18rem;
+        height: 18rem;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 50%;
+        content: "";
+        box-shadow: 0 0 0 2rem rgba(255, 255, 255, 0.035),
+                    0 0 0 4rem rgba(255, 255, 255, 0.025);
+        pointer-events: none;
+    }
+
+    .hero-eyebrow {
+        margin-bottom: 0.65rem;
+        color: #bfdbfe;
+        font-size: 0.76rem;
+        font-weight: 750;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+
+    .app-hero h1 {
+        position: relative;
+        z-index: 1;
+        max-width: 850px;
+        margin: 0;
+        color: #ffffff;
+        font-size: clamp(1.8rem, 4vw, 2.65rem);
+        line-height: 1.14;
+    }
+
+    .app-hero p {
+        position: relative;
+        z-index: 1;
+        max-width: 800px;
+        margin: 0.8rem 0 0;
+        color: #e2e8f0;
+        font-size: 1rem;
+        line-height: 1.65;
+    }
+
+    .hero-badges {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        margin-top: 1.2rem;
+    }
+
+    .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.42rem 0.7rem;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        color: #f8fafc;
+        background: rgba(15, 23, 42, 0.18);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .sidebar-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        margin: 0.45rem 0 1.25rem;
+        padding: 0.8rem 0.7rem;
+        border: 1px solid #dce5ef;
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.76);
+    }
+
+    .sidebar-brand-mark {
+        display: grid;
+        width: 2.65rem;
+        height: 2.65rem;
+        flex: 0 0 2.65rem;
+        place-items: center;
+        border-radius: 0.85rem;
+        color: #ffffff;
+        background: linear-gradient(135deg, #2563eb, #0f766e);
+        font-size: 0.9rem;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+    }
+
+    .sidebar-brand-copy strong,
+    .sidebar-brand-copy span {
+        display: block;
+    }
+
+    .sidebar-brand-copy strong {
+        color: var(--brand-navy);
+        font-size: 0.88rem;
+    }
+
+    .sidebar-brand-copy span {
+        margin-top: 0.15rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.4;
+    }
+
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #edf4fc 0%, #f8fafc 100%);
         border-right: 1px solid var(--border);
@@ -219,6 +339,10 @@ st.markdown(
 
         [data-testid="stForm"] {
             padding: 1rem;
+        }
+
+        .app-hero {
+            border-radius: 1rem;
         }
     }
     </style>
@@ -969,7 +1093,19 @@ def buat_paket_hasil_laporan(
 
 
 # Navigation Sidebar
-st.sidebar.title("📌 Menu Navigasi")
+st.sidebar.markdown(
+    """
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-mark">SI</div>
+        <div class="sidebar-brand-copy">
+            <strong>Evaluasi Akademik</strong>
+            <span>Program Studi Sistem Informasi</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown("#### Navigasi")
 mode = st.sidebar.radio("Pilih Tampilan:", ["Form Evaluasi Mahasiswa", "Dashboard Laporan Prodi (Admin)"])
 
 st.sidebar.markdown("---")
@@ -979,12 +1115,34 @@ st.sidebar.caption("**Fakultas Ilmu Komputer**  \nUniversitas Duta Bangsa Suraka
 # 1. FORM EVALUASI MAHASISWA
 # ==========================================
 if mode == "Form Evaluasi Mahasiswa":
-    st.title("Form Evaluasi Pembelajaran S1 Sistem Informasi")
-    st.caption("Mohon Diisi Sesuai Keadaan Yang Sebenarnya. Hasil respon Anda bersifat rahasia (anonim) dan digunakan sebagai bahan evaluasi program studi.")
-    st.markdown("---")
+    st.markdown(
+        """
+        <section class="app-hero">
+            <div class="hero-eyebrow">Fakultas Ilmu Komputer · UDB Surakarta</div>
+            <h1>Evaluasi Pembelajaran</h1>
+            <p>
+                Sampaikan pengalaman belajar Anda dengan jujur. Masukan ini
+                membantu program studi meningkatkan kualitas pembelajaran.
+            </p>
+            <div class="hero-badges">
+                <span class="hero-badge">🔒 Respon bersifat anonim</span>
+                <span class="hero-badge">📚 Program Studi S1 Sistem Informasi</span>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Pilih Kelas Perkuliahan
-    kelas_terpilih = st.selectbox("Pilih Kelas Perkuliahan *", list(DATA_KELAS_JADWAL.keys()))
+    with st.container(border=True):
+        st.markdown("#### Mulai evaluasi")
+        kelas_terpilih = st.selectbox(
+            "Pilih kelas perkuliahan *",
+            list(DATA_KELAS_JADWAL.keys()),
+        )
+        st.caption(
+            "Pilih kelas Anda untuk menampilkan mata kuliah dan dosen pengampu."
+        )
 
     list_matkul = DATA_KELAS_JADWAL[kelas_terpilih]
     list_dosen_label = [f"{m['matkul']} ({m['dosen']})" for m in list_matkul]
@@ -1083,7 +1241,23 @@ if mode == "Form Evaluasi Mahasiswa":
 # 2. DASHBOARD LAPORAN PRODI (KHUSUS ADMIN)
 # ==========================================
 elif mode == "Dashboard Laporan Prodi (Admin)":
-    st.title("🔒 Login Admin Evaluasi Program Studi")
+    st.markdown(
+        """
+        <section class="app-hero">
+            <div class="hero-eyebrow">Ruang administrasi · Fakultas Ilmu Komputer</div>
+            <h1>Dashboard Evaluasi</h1>
+            <p>
+                Pantau hasil evaluasi pembelajaran dan unduh laporan program
+                studi dengan mudah.
+            </p>
+            <div class="hero-badges">
+                <span class="hero-badge">🔐 Akses khusus admin</span>
+                <span class="hero-badge">📊 Ringkasan respon mahasiswa</span>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Autentikasi Password Admin
     if not st.session_state["admin_logged_in"]:
