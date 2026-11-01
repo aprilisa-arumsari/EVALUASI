@@ -1460,6 +1460,9 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             <div class="hero-eyebrow">Ruang administrasi · Fakultas Ilmu Komputer</div>
             <h1>Dashboard Evaluasi</h1>
             <p>
+                Evaluasi Pembelajaran Program Studi Sistem Informasi
+            </p>
+            <p>
                 Pantau hasil evaluasi pembelajaran dan unduh laporan program
                 studi dengan mudah.
             </p>
@@ -1995,3 +1998,13 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 )
             else:
                 st.warning("Data evaluasi belum cukup untuk membuat laporan PDF.")
+
+st.markdown(
+    """
+    <div style="margin-top: 2rem; padding: 1rem 0; border-top: 1px solid #dce5ef;
+                color: #64748b; text-align: center; font-size: 0.85rem;">
+        Created by Aprilisa Arum Sari
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
