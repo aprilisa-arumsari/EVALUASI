@@ -765,25 +765,37 @@ def buat_gambar_batang_png(
                 color="#334155",
             )
 
-    axis.set_title(
-        judul,
-        fontsize=14,
-        fontweight="bold",
-        color="#17324D",
-        loc="left",
-        pad=18,
-    )
     if horizontal:
-        axis.legend(
+        figure.suptitle(
+            judul,
+            x=0.08,
+            y=0.98,
+            ha="left",
+            fontsize=14,
+            fontweight="bold",
+            color="#17324D",
+        )
+        figure.legend(
             title=kelompok,
-            loc="lower center",
-            bbox_to_anchor=(0.5, 1.01),
-            ncol=min(3, len(kelompok_values)),
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.88),
+            ncol=min(2, len(kelompok_values)),
             frameon=False,
-            fontsize=9,
+            fontsize=8,
             title_fontsize=9,
+            columnspacing=1.2,
+            handletextpad=0.55,
+            labelspacing=0.3,
         )
     else:
+        axis.set_title(
+            judul,
+            fontsize=14,
+            fontweight="bold",
+            color="#17324D",
+            loc="left",
+            pad=18,
+        )
         axis.legend(
             title=kelompok,
             frameon=False,
@@ -814,7 +826,10 @@ def buat_gambar_batang_png(
         axis.margins(x=0.16 if horizontal else 0, y=0.08)
 
     buffer = BytesIO()
-    figure.tight_layout(rect=(0, 0, 1, 0.96))
+    if horizontal:
+        figure.tight_layout(rect=(0, 0.03, 1, 0.62))
+    else:
+        figure.tight_layout(rect=(0, 0, 1, 0.96))
     figure.savefig(buffer, format="png", dpi=160, bbox_inches="tight")
     plt.close(figure)
     return buffer.getvalue()
