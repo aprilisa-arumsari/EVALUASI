@@ -1,12 +1,22 @@
 import json
 import os
+import threading
+import zipfile
 from io import BytesIO
 import re
 from xml.sax.saxutils import escape
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+from google.auth.exceptions import GoogleAuthError
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import plotly.express as px
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
@@ -34,6 +44,49 @@ PASSWORD_ADMIN = _ambil_password_admin()
 if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
     st.error("ADMIN_PASSWORD harus terdiri dari minimal 16 karakter.")
     st.stop()
+
+GOOGLE_DRIVE_FOLDER_ID = "1PQ1Ri52PYbGAlMlKMr0Q0Vad2kEDEL4K"
+GOOGLE_DRIVE_FILE_NAME = "data_evaluasi.csv"
+GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+GOOGLE_DRIVE_LOCK = threading.Lock()
+
+
+def _ambil_konfigurasi_google_drive():
+    try:
+        config = st.secrets["google_drive"]
+        service_account_json = config["service_account_json"]
+        credentials_info = json.loads(service_account_json)
+    except (
+        KeyError,
+        StreamlitSecretNotFoundError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as error:
+        raise RuntimeError(
+            "Atur [google_drive] dan service_account_json di Streamlit Secrets."
+        ) from error
+
+    if not isinstance(credentials_info, dict):
+        raise RuntimeError("service_account_json harus berupa JSON service account.")
+
+    return credentials_info
+
+
+try:
+    GOOGLE_DRIVE_CREDENTIALS = _ambil_konfigurasi_google_drive()
+except RuntimeError as error:
+    st.error(f"Penyimpanan permanen belum siap: {error}")
+    st.stop()
+
+
+@st.cache_resource
+def _google_drive_service():
+    credentials = Credentials.from_service_account_info(
+        GOOGLE_DRIVE_CREDENTIALS,
+        scopes=[GOOGLE_DRIVE_SCOPE],
+    )
+    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
 DATA_KELAS_JADWAL = {
@@ -179,7 +232,6 @@ OPSI_METODE = [
     "Sering Tidak Masuk Dan Tidak Memberikan Materi"
 ]
 
-DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
 KOLOM_JSON_REPON = [
     "Metode Pembelajaran",
     "Dosen GMeet Selalu",
@@ -188,29 +240,17 @@ KOLOM_JSON_REPON = [
     "Dosen Kurang Disukai",
 ]
 
-
-def load_respon_evaluasi():
-    if not os.path.exists(DATA_EVALUASI_FILE):
-        return []
-
-    try:
-        df = pd.read_csv(DATA_EVALUASI_FILE)
-        if df.empty:
-            return []
-
-        records = df.to_dict(orient="records")
-        for row in records:
-            for key in KOLOM_JSON_REPON:
-                value = row.get(key)
-                if isinstance(value, str):
-                    try:
-                        row[key] = json.loads(value)
-                    except (TypeError, ValueError):
-                        row[key] = value
-        return records
-    except (OSError, pd.errors.ParserError, UnicodeDecodeError) as error:
-        st.error(f"Gagal membaca data evaluasi dari {DATA_EVALUASI_FILE}: {error}")
-        st.stop()
+KOLOM_REPON = [
+    "Timestamp",
+    "Kelas",
+    "Metode Pembelajaran",
+    "Dosen GMeet Selalu",
+    "Dosen GMeet Tidak Pernah",
+    "Dosen Favorit",
+    "Dosen Kurang Disukai",
+    "Harapan Semester Depan",
+    "Catatan Permasalahan",
+]
 
 
 def _siapkan_respon_untuk_csv(data_list):
@@ -224,19 +264,148 @@ def _siapkan_respon_untuk_csv(data_list):
     return rows_to_save
 
 
-def simpan_respon_evaluasi(data_list):
-    if not data_list:
-        return
+def _csv_respon_bytes(data_list):
+    rows_to_save = _siapkan_respon_untuk_csv(data_list)
+    return pd.DataFrame(rows_to_save, columns=KOLOM_REPON).to_csv(
+        index=False
+    ).encode("utf-8-sig")
 
-    rows_to_save = []
-    for row in data_list:
-        prepared = row.copy()
+
+def _csv_ke_respon(csv_bytes):
+    try:
+        df = pd.read_csv(BytesIO(csv_bytes))
+    except pd.errors.EmptyDataError:
+        return []
+    records = df.to_dict(orient="records")
+    for row in records:
         for key in KOLOM_JSON_REPON:
-            if key in prepared and prepared[key] is not None:
-                prepared[key] = json.dumps(prepared[key], ensure_ascii=False)
-        rows_to_save.append(prepared)
+            value = row.get(key)
+            if isinstance(value, str):
+                try:
+                    row[key] = json.loads(value)
+                except (TypeError, ValueError):
+                    row[key] = value
+    return records
 
-    pd.DataFrame(rows_to_save).to_csv(DATA_EVALUASI_FILE, index=False)
+
+def _google_drive_file_id(service):
+    escaped_name = GOOGLE_DRIVE_FILE_NAME.replace("\\", "\\\\").replace("'", "\\'")
+    query = (
+        f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and "
+        f"name = '{escaped_name}' and trashed = false"
+    )
+    result = (
+        service.files()
+        .list(
+            q=query,
+            spaces="drive",
+            pageSize=2,
+            fields="files(id,name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+    )
+    files = result.get("files", [])
+    if len(files) > 1:
+        raise RuntimeError(
+            "Folder Google Drive berisi lebih dari satu data_evaluasi.csv. "
+            "Hapus atau pindahkan file duplikat."
+        )
+    return files[0]["id"] if files else None
+
+
+def _muat_csv_drive(service, file_id):
+    response = (
+        service.files()
+        .get(fileId=file_id, alt="media", supportsAllDrives=True)
+        .execute()
+    )
+    if not isinstance(response, bytes):
+        raise RuntimeError("Google Drive mengembalikan format file yang tidak valid.")
+    return _csv_ke_respon(response)
+
+
+def _unggah_csv_drive(service, data_list, file_id):
+    media = MediaIoBaseUpload(
+        BytesIO(_csv_respon_bytes(data_list)),
+        mimetype="text/csv",
+        resumable=True,
+    )
+    service.files().update(
+        fileId=file_id,
+        media_body=media,
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
+
+
+def _baca_respon_lokal():
+    local_file = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
+    if not os.path.exists(local_file):
+        return []
+    with open(local_file, "rb") as csv_file:
+        return _csv_ke_respon(csv_file.read())
+
+
+def _drive_error(error):
+    if isinstance(error, HttpError):
+        status = getattr(error.resp, "status", "unknown")
+        return RuntimeError(
+            f"Google Drive mengembalikan HTTP {status}. Periksa akses folder "
+            "dan service account."
+        )
+    if isinstance(error, GoogleAuthError):
+        return RuntimeError(
+            "Autentikasi Google Drive gagal. Periksa service account di Secrets."
+        )
+    return RuntimeError(
+        "Google Drive tidak dapat diakses. Periksa koneksi dan izin folder."
+    )
+
+
+def load_respon_evaluasi():
+    try:
+        with GOOGLE_DRIVE_LOCK:
+            service = _google_drive_service()
+            file_id = _google_drive_file_id(service)
+            if not file_id:
+                raise RuntimeError(
+                    "File data_evaluasi.csv belum ada di folder Google Drive. "
+                    "Unggah template CSV terlebih dahulu."
+                )
+
+            records = _muat_csv_drive(service, file_id)
+            if not records:
+                local_records = _baca_respon_lokal()
+                if local_records:
+                    _unggah_csv_drive(service, local_records, file_id)
+                    return local_records
+            return records
+    except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
+        st.error(f"Gagal memuat respon dari Google Drive: {_drive_error(error)}")
+        st.stop()
+    except RuntimeError as error:
+        st.error(f"Gagal memuat respon dari Google Drive: {error}")
+        st.stop()
+
+
+def simpan_respon_evaluasi(data_respon):
+    try:
+        with GOOGLE_DRIVE_LOCK:
+            service = _google_drive_service()
+            file_id = _google_drive_file_id(service)
+            if not file_id:
+                raise RuntimeError(
+                    "File data_evaluasi.csv belum ada di folder Google Drive. "
+                    "Unggah template CSV terlebih dahulu."
+                )
+
+            records = _muat_csv_drive(service, file_id)
+            records.append(data_respon)
+            _unggah_csv_drive(service, records, file_id)
+    except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
+        raise _drive_error(error) from error
 
 
 # Inisialisasi Session State
@@ -255,6 +424,67 @@ def _safe_text(value):
 def _angkatan_dari_kelas(kelas):
     match = re.match(r"^SI\s*(\d{2})", str(kelas).strip().upper())
     return f"20{match.group(1)}" if match else "Tidak diketahui"
+
+
+def buat_gambar_batang_png(
+    data,
+    kategori,
+    nilai,
+    kelompok,
+    judul,
+    horizontal=False,
+):
+    if data.empty:
+        return b""
+
+    kelompok_values = data[kelompok].drop_duplicates().tolist()
+    kategori_values = data[kategori].drop_duplicates().tolist()
+    bar_size = 0.8 / len(kelompok_values)
+    positions = list(range(len(kategori_values)))
+    figure_height = max(6, len(kategori_values) * 0.45) if horizontal else 8
+    figure, axis = plt.subplots(figsize=(14, figure_height))
+
+    for index, kelompok_value in enumerate(kelompok_values):
+        subset = data[data[kelompok] == kelompok_value]
+        nilai_by_category = (
+            subset.groupby(kategori, dropna=False)[nilai].sum().to_dict()
+        )
+        values = [nilai_by_category.get(value, 0) for value in kategori_values]
+        offset = (index - (len(kelompok_values) - 1) / 2) * bar_size
+        bar_positions = [position + offset for position in positions]
+        if horizontal:
+            axis.barh(
+                bar_positions,
+                values,
+                height=bar_size,
+                label=str(kelompok_value),
+            )
+        else:
+            axis.bar(
+                bar_positions,
+                values,
+                width=bar_size,
+                label=str(kelompok_value),
+            )
+
+    axis.set_title(judul)
+    axis.legend(title=kelompok)
+    axis.set_axisbelow(True)
+    if horizontal:
+        axis.set_yticks(positions, kategori_values)
+        axis.set_xlabel(nilai)
+        axis.invert_yaxis()
+        axis.grid(axis="x", alpha=0.25)
+    else:
+        axis.set_xticks(positions, kategori_values, rotation=45, ha="right")
+        axis.set_ylabel(nilai)
+        axis.grid(axis="y", alpha=0.25)
+
+    buffer = BytesIO()
+    figure.tight_layout()
+    figure.savefig(buffer, format="png", dpi=160, bbox_inches="tight")
+    plt.close(figure)
+    return buffer.getvalue()
 
 
 def _tabel_pdf(rows, col_widths):
@@ -411,6 +641,36 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
     return buffer.getvalue()
 
 
+def buat_paket_hasil_laporan(
+    df_view,
+    respon_list,
+    grafik_list,
+    pdf_bytes,
+    nama_angkatan,
+):
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as paket:
+        paket.writestr(
+            "data/Laporan_Hasil_Evaluasi.csv",
+            _csv_respon_bytes(df_view.to_dict(orient="records")),
+        )
+        paket.writestr(
+            "data/Cadangan_Semua_Respon.csv",
+            _csv_respon_bytes(respon_list),
+        )
+        if pdf_bytes:
+            paket.writestr(
+                f"Laporan_Evaluasi_Angkatan_{nama_angkatan}.pdf",
+                pdf_bytes,
+            )
+        for nama_grafik, gambar_png in grafik_list:
+            paket.writestr(
+                f"grafik/{nama_grafik}.png",
+                gambar_png,
+            )
+    return buffer.getvalue()
+
+
 # Navigation Sidebar
 st.sidebar.title("📌 Menu Navigasi")
 mode = st.sidebar.radio("Pilih Tampilan:", ["Form Evaluasi Mahasiswa", "Dashboard Laporan Prodi (Admin)"])
@@ -505,13 +765,11 @@ if mode == "Form Evaluasi Mahasiswa":
                     "Catatan Permasalahan": permasalahan_dosen
                 }
                 try:
-                    simpan_respon_evaluasi(
-                        st.session_state["respon_evaluasi"] + [data_respon]
-                    )
-                except (OSError, TypeError, ValueError) as error:
+                    simpan_respon_evaluasi(data_respon)
+                except (RuntimeError, OSError, TypeError, ValueError) as error:
                     st.error(
-                        f"Respon belum tersimpan ke file lokal. Periksa izin "
-                        f"penyimpanan dan coba kembali. Detail: {error}"
+                        "Respon belum tersimpan secara permanen ke Google Drive. "
+                        f"Periksa koneksi dan konfigurasi, lalu coba kembali. Detail: {error}"
                     )
                 else:
                     st.session_state["respon_evaluasi"].append(data_respon)
@@ -580,6 +838,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             metric_cols[0].metric("Total Respon", len(df_view))
             metric_cols[1].metric("Jumlah Kelas", df_view["Kelas"].nunique())
             metric_cols[2].metric("Angkatan", angkatan_filter)
+            grafik_unduhan = []
             st.markdown("---")
 
             st.subheader("📊 Partisipasi Respon per Kelas")
@@ -637,6 +896,18 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 )
                 fig_fav.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig_fav, use_container_width=True)
+                grafik_unduhan.append(
+                    (
+                        "dosen_favorit",
+                        buat_gambar_batang_png(
+                            df_fav,
+                            "Dosen",
+                            "Jumlah Suara",
+                            "Kelas",
+                            "Jumlah Suara Dosen Favorit per Kelas",
+                        ),
+                    )
+                )
             else:
                 st.info("Belum ada suara dosen favorit untuk filter kelas ini.")
 
@@ -663,6 +934,18 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 )
                 fig_not_fav.update_layout(xaxis_tickangle=-45)
                 st.plotly_chart(fig_not_fav, use_container_width=True)
+                grafik_unduhan.append(
+                    (
+                        "dosen_tidak_disukai",
+                        buat_gambar_batang_png(
+                            df_not_fav,
+                            "Dosen",
+                            "Jumlah Suara",
+                            "Kelas",
+                            "Jumlah Suara Dosen Tidak Disukai per Kelas",
+                        ),
+                    )
+                )
             else:
                 st.info("Belum ada mahasiswa yang menandai dosen tidak disukai untuk filter ini.")
 
@@ -763,6 +1046,19 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                     legend_title_text="Metode Pembelajaran",
                 )
                 st.plotly_chart(fig_metode, use_container_width=True)
+                grafik_unduhan.append(
+                    (
+                        "metode_pembelajaran",
+                        buat_gambar_batang_png(
+                            hasil_metode,
+                            "Mata Kuliah",
+                            "Jumlah Respon",
+                            "Metode Pembelajaran",
+                            "Distribusi Metode Pembelajaran per Mata Kuliah",
+                            horizontal=True,
+                        ),
+                    )
+                )
             else:
                 st.info(
                     "Belum ada hasil metode pembelajaran untuk kelas ini."
@@ -784,13 +1080,43 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 mime="text/csv"
             )
 
+            report_label = angkatan_filter
+            nama_angkatan_pdf = (
+                angkatan_filter.replace(" ", "_")
+                if angkatan_filter != "Semua Angkatan"
+                else "Semua_Angkatan"
+            )
+            pdf_file_name = f"Laporan_Evaluasi_Angkatan_{nama_angkatan_pdf}.pdf"
+            pdf_bytes = generate_pdf_laporan_kelas(df_view, report_label)
+            try:
+                paket_bytes = buat_paket_hasil_laporan(
+                    df_view,
+                    respon_list,
+                    grafik_unduhan,
+                    pdf_bytes,
+                    nama_angkatan_pdf,
+                )
+            except (OSError, RuntimeError, ValueError) as error:
+                st.error(
+                    "Paket unduhan lengkap gagal dibuat. Pastikan dependensi "
+                    f"ekspor grafik sudah terpasang. Detail: {error}"
+                )
+            else:
+                st.download_button(
+                    label="Download Semua Hasil (ZIP)",
+                    data=paket_bytes,
+                    file_name=f"Semua_Hasil_Evaluasi_{nama_angkatan_pdf}.zip",
+                    mime="application/zip",
+                    help=(
+                        "Berisi CSV laporan, cadangan seluruh respon, PDF, "
+                        "dan gambar grafik yang tersedia."
+                    ),
+                )
+
             st.markdown("#### Cadangan Data Lengkap")
             st.warning(
-                "Data aplikasi disimpan di file lokal dan bisa hilang saat aplikasi "
-                "di-restart atau diperbarui. Unduh cadangan minimal setiap hari saat "
-                "survei aktif dan sebelum aplikasi diperbarui, simpan "
-                "di lokasi pribadi yang aksesnya dibatasi, dan jangan hanya menyimpan "
-                "salinannya di perangkat yang sama."
+                "Data utama tersimpan di Google Drive. Tetap unduh cadangan secara "
+                "berkala dan simpan di lokasi pribadi yang aksesnya dibatasi."
             )
             cadangan_csv = (
                 pd.DataFrame(_siapkan_respon_untuk_csv(respon_list))
@@ -808,14 +1134,6 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             st.markdown("---")
             st.subheader("📄 Download Laporan PDF per Angkatan")
-            report_label = angkatan_filter
-            nama_angkatan_pdf = (
-                angkatan_filter.replace(" ", "_")
-                if angkatan_filter != "Semua Angkatan"
-                else "Semua_Angkatan"
-            )
-            pdf_file_name = f"Laporan_Evaluasi_Angkatan_{nama_angkatan_pdf}.pdf"
-            pdf_bytes = generate_pdf_laporan_kelas(df_view, report_label)
             if pdf_bytes:
                 st.download_button(
                     label="Download Laporan PDF",
