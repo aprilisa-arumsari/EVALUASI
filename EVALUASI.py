@@ -1,11 +1,13 @@
 import json
 import os
 from io import BytesIO
+import re
+from xml.sax.saxutils import escape
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -217,68 +219,147 @@ def _safe_text(value):
     return str(value)
 
 
-def generate_pdf_laporan_kelas(df_view, kelas_label):
+def _angkatan_dari_kelas(kelas):
+    match = re.match(r"^SI\s*(\d{2})", str(kelas).strip().upper())
+    return f"20{match.group(1)}" if match else "Tidak diketahui"
+
+
+def _tabel_pdf(rows, col_widths):
+    table = Table(rows, colWidths=col_widths, repeatRows=1, splitByRow=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), "#1f4e78"),
+                ("TEXTCOLOR", (0, 0), (-1, 0), "#ffffff"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("LEADING", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.35, "#9aa7b2"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), ["#ffffff", "#edf3f8"]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return table
+
+
+def generate_pdf_laporan_kelas(df_view, angkatan_label):
     if df_view.empty:
         return b""
 
     styles = getSampleStyleSheet()
     buffer = BytesIO()
-    pdf = SimpleDocTemplate(buffer, pagesize=A4)
+    pdf = SimpleDocTemplate(buffer, pagesize=landscape(A4))
 
     story = []
-    story.append(Paragraph(f"Laporan Evaluasi Pembelajaran\n{kelas_label}", styles["Title"]))
-    story.append(Spacer(1, 18))
-    story.append(Paragraph(f"Jumlah Respon: {len(df_view)}", styles["BodyText"]))
+    story.append(
+        Paragraph(
+            f"Laporan Evaluasi Pembelajaran<br/>{escape(angkatan_label)}",
+            styles["Title"],
+        )
+    )
+    story.append(Spacer(1, 10))
+    story.append(
+        Paragraph(
+            f"Jumlah respon: {len(df_view)} | Jumlah kelas: {df_view['Kelas'].nunique()}",
+            styles["BodyText"],
+        )
+    )
     story.append(Spacer(1, 12))
 
-    method_rows = []
-    method_rows.append(["Metode Pembelajaran", "Jumlah"])
+    story.append(Paragraph("1. Jumlah Respon per Kelas", styles["Heading2"]))
+    class_counts = df_view["Kelas"].value_counts().sort_index()
+    class_rows = [["Kelas", "Jumlah Respon"]]
+    class_rows.extend(
+        [escape(str(kelas)), str(jumlah)]
+        for kelas, jumlah in class_counts.items()
+    )
+    story.append(_tabel_pdf(class_rows, [430, 250]))
+    story.append(Spacer(1, 12))
+
+    method_counts = {}
     for _, row in df_view.iterrows():
         for matkul, metode in row["Metode Pembelajaran"].items():
-            method_rows.append([f"{matkul}", _safe_text(metode)])
-
-    method_summary = pd.DataFrame(method_rows[1:], columns=["Matakuliah", "Metode"]) if len(method_rows) > 1 else pd.DataFrame(columns=["Matakuliah", "Metode"])
-    if not method_summary.empty:
-        method_counts = method_summary["Metode"].value_counts().reset_index()
-        method_counts.columns = ["Metode Pembelajaran", "Jumlah"]
-        method_table = [["Metode Pembelajaran", "Jumlah"]]
-        for _, item in method_counts.iterrows():
-            method_table.append([_safe_text(item["Metode Pembelajaran"]), _safe_text(item["Jumlah"])])
-        story.append(Paragraph("1. Distribusi Metode Pembelajaran", styles["Heading2"]))
-        story.append(Table(method_table, colWidths=[260, 100]))
-        story.append(Spacer(1, 12))
-
-    favorite_list = []
-    for dosen_list in df_view["Dosen Favorit"]:
-        favorite_list.extend(dosen_list)
-    if favorite_list:
-        favorite_counts = pd.DataFrame(favorite_list, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
-        favorite_table = [["Dosen", "Jumlah Suara"]]
-        for _, item in favorite_counts.iterrows():
-            favorite_table.append([_safe_text(item["Dosen"]), _safe_text(item["Jumlah Suara"])])
-        story.append(Paragraph("2. Dosen Favorit Mahasiswa", styles["Heading2"]))
-        story.append(Table(favorite_table, colWidths=[260, 100]))
-        story.append(Spacer(1, 12))
-
-    komentar_rows = []
-    for _, row in df_view.iterrows():
-        if row["Harapan Semester Depan"]:
-            komentar_rows.append(f"- Harapan: {_safe_text(row['Harapan Semester Depan'])}")
-        if row["Catatan Permasalahan"]:
-            komentar_rows.append(f"- Permasalahan: {_safe_text(row['Catatan Permasalahan'])}")
-
-    story.append(Paragraph("3. Harapan dan Permasalahan Mahasiswa", styles["Heading2"]))
-    if komentar_rows:
-        for entry in komentar_rows:
-            story.append(Paragraph(entry, styles["BodyText"]))
+            key = (row["Kelas"], matkul, metode)
+            method_counts[key] = method_counts.get(key, 0) + 1
+    story.append(Paragraph("2. Evaluasi Metode Pembelajaran", styles["Heading2"]))
+    if method_counts:
+        method_rows = [["Kelas", "Mata Kuliah", "Metode", "Jumlah"]]
+        method_rows.extend(
+            [
+                escape(str(kelas)),
+                escape(str(matkul)),
+                escape(str(metode)),
+                str(jumlah),
+            ]
+            for (kelas, matkul, metode), jumlah in sorted(method_counts.items())
+        )
+        story.append(_tabel_pdf(method_rows, [100, 190, 325, 65]))
     else:
+        story.append(Paragraph("Data metode pembelajaran tidak tersedia.", styles["BodyText"]))
+    story.append(Spacer(1, 12))
+
+    vote_sections = [
+        ("3. Peringkat Dosen Favorit", "Dosen Favorit"),
+        ("4. Peringkat Dosen Tidak Disukai", "Dosen Kurang Disukai"),
+        ("5. Penggunaan Google Meet", "Dosen GMeet Selalu"),
+        ("6. Tidak Menggunakan Google Meet", "Dosen GMeet Tidak Pernah"),
+    ]
+    for heading, column in vote_sections:
+        vote_counts = {}
+        for _, row in df_view.iterrows():
+            for dosen in row[column]:
+                key = (row["Kelas"], dosen)
+                vote_counts[key] = vote_counts.get(key, 0) + 1
+
+        story.append(Paragraph(escape(heading), styles["Heading2"]))
+        if vote_counts:
+            vote_rows = [["Kelas", "Dosen", "Jumlah Suara"]]
+            vote_rows.extend(
+                [escape(str(kelas)), escape(str(dosen)), str(jumlah)]
+                for (kelas, dosen), jumlah in sorted(
+                    vote_counts.items(), key=lambda item: (-item[1], item[0])
+                )
+            )
+            story.append(_tabel_pdf(vote_rows, [150, 440, 90]))
+        else:
+            story.append(Paragraph("Belum ada jawaban untuk bagian ini.", styles["BodyText"]))
+        story.append(Spacer(1, 12))
+
+    story.append(Paragraph("7. Harapan dan Permasalahan Mahasiswa", styles["Heading2"]))
+    has_comments = False
+    for _, row in df_view.iterrows():
+        harapan = _safe_text(row["Harapan Semester Depan"])
+        masalah = _safe_text(row["Catatan Permasalahan"])
+        story.append(
+            Paragraph(
+                f"{escape(_safe_text(row['Timestamp']))} — "
+                f"{escape(_safe_text(row['Kelas']))}",
+                styles["Heading3"],
+            )
+        )
+        story.append(
+            Paragraph(
+                f"<b>Harapan:</b> {escape(harapan).replace(chr(10), '<br/>')}",
+                styles["BodyText"],
+            )
+        )
+        story.append(
+            Paragraph(
+                f"<b>Permasalahan:</b> {escape(masalah).replace(chr(10), '<br/>')}",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 6))
+        has_comments = has_comments or harapan != "-" or masalah != "-"
+    if not has_comments:
         story.append(Paragraph("Tidak ada catatan tambahan.", styles["BodyText"]))
 
-    try:
-        pdf.build(story)
-    except Exception:
-        story.append(Paragraph("Laporan ini dibuat berdasarkan data evaluasi yang tersedia.", styles["BodyText"]))
-        pdf.build(story)
+    pdf.build(story)
 
     return buffer.getvalue()
 
@@ -414,15 +495,58 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
         else:
             df_respon = pd.DataFrame(respon_list)
             
-            # Filter Kelas Laporan
-            kelas_filter = st.selectbox("Filter Kelas Laporan:", ["Semua Kelas"] + list(DATA_KELAS_JADWAL.keys()))
-            if kelas_filter != "Semua Kelas":
-                df_view = df_respon[df_respon["Kelas"] == kelas_filter]
+            df_respon["Angkatan"] = df_respon["Kelas"].map(_angkatan_dari_kelas)
+            angkatan_options = sorted(
+                angkatan
+                for angkatan in df_respon["Angkatan"].dropna().unique()
+                if angkatan != "Tidak diketahui"
+            )
+            angkatan_filter = st.selectbox(
+                "Pilih Angkatan Laporan:",
+                ["Semua Angkatan"] + angkatan_options,
+            )
+            if angkatan_filter != "Semua Angkatan":
+                df_view = df_respon[df_respon["Angkatan"] == angkatan_filter]
             else:
                 df_view = df_respon
 
-            st.metric("Total Respon Masuk", len(df_view))
+            metric_cols = st.columns(3)
+            metric_cols[0].metric("Total Respon", len(df_view))
+            metric_cols[1].metric("Jumlah Kelas", df_view["Kelas"].nunique())
+            metric_cols[2].metric("Angkatan", angkatan_filter)
             st.markdown("---")
+
+            st.subheader("📊 Partisipasi Respon per Kelas")
+            respon_per_kelas = (
+                df_view.groupby("Kelas")
+                .size()
+                .rename("Jumlah Respon")
+                .reset_index()
+                .sort_values("Kelas")
+            )
+            st.dataframe(respon_per_kelas, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.subheader("📚 Evaluasi Metode Pembelajaran per Mata Kuliah")
+            metode_rows = [
+                {
+                    "Kelas": row["Kelas"],
+                    "Mata Kuliah": matkul,
+                    "Metode Pembelajaran": metode,
+                }
+                for _, row in df_view.iterrows()
+                for matkul, metode in row["Metode Pembelajaran"].items()
+            ]
+            if metode_rows:
+                metode_summary = (
+                    pd.DataFrame(metode_rows)
+                    .value_counts(["Kelas", "Mata Kuliah", "Metode Pembelajaran"])
+                    .reset_index(name="Jumlah")
+                    .sort_values(["Kelas", "Mata Kuliah", "Jumlah"], ascending=[True, True, False])
+                )
+                st.dataframe(metode_summary, use_container_width=True, hide_index=True)
+            else:
+                st.info("Belum ada data metode pembelajaran untuk angkatan ini.")
 
             # Visualisasi Dosen Favorit
             st.subheader("🏆 Peringkat Dosen Favorit Mahasiswa")
@@ -480,26 +604,44 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("📹 Dosen Selalu Menggunakan GMeet")
-                all_gmeet = [d for sublist in df_view["Dosen GMeet Selalu"] for d in sublist]
-                if all_gmeet:
-                    df_gm = pd.DataFrame(all_gmeet, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
-                    st.dataframe(df_gm, use_container_width=True)
+                gmeet_rows = [
+                    {"Kelas": row["Kelas"], "Dosen": dosen}
+                    for _, row in df_view.iterrows()
+                    for dosen in row["Dosen GMeet Selalu"]
+                ]
+                if gmeet_rows:
+                    df_gm = (
+                        pd.DataFrame(gmeet_rows)
+                        .value_counts(["Kelas", "Dosen"])
+                        .reset_index(name="Jumlah Suara")
+                    )
+                    st.dataframe(df_gm, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Belum ada respon untuk bagian ini.")
 
             with col2:
                 st.subheader("⚠️ Dosen Tanpa GMeet (Hanya Share E-learning/WA)")
-                all_nogmeet = [d for sublist in df_view["Dosen GMeet Tidak Pernah"] for d in sublist]
-                if all_nogmeet:
-                    df_nogm = pd.DataFrame(all_nogmeet, columns=["Dosen"]).value_counts().reset_index(name="Jumlah Suara")
-                    st.dataframe(df_nogm, use_container_width=True)
+                nogmeet_rows = [
+                    {"Kelas": row["Kelas"], "Dosen": dosen}
+                    for _, row in df_view.iterrows()
+                    for dosen in row["Dosen GMeet Tidak Pernah"]
+                ]
+                if nogmeet_rows:
+                    df_nogm = (
+                        pd.DataFrame(nogmeet_rows)
+                        .value_counts(["Kelas", "Dosen"])
+                        .reset_index(name="Jumlah Suara")
+                    )
+                    st.dataframe(df_nogm, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Belum ada respon untuk bagian ini.")
 
             st.markdown("---")
-            st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa per Kelas")
-            kelas_komentar = st.selectbox("Pilih Kelas untuk Lihat Komentar:", ["Semua Kelas"] + list(DATA_KELAS_JADWAL.keys()))
-            if kelas_komentar != "Semua Kelas":
-                df_komentar = df_respon[df_respon["Kelas"] == kelas_komentar][["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]]
-            else:
-                df_komentar = df_respon[["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]]
-            st.dataframe(df_komentar, use_container_width=True)
+            st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa")
+            df_komentar = df_view[
+                ["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]
+            ]
+            st.dataframe(df_komentar, use_container_width=True, hide_index=True)
 
             # Unduh CSV
             st.subheader("📥 Export Laporan Evaluasi")
@@ -512,10 +654,15 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             )
 
             st.markdown("---")
-            st.subheader("📄 Download PDF Per Kelas")
-            nama_kelas_pdf = kelas_filter if kelas_filter != "Semua Kelas" else "Semua_Kelas"
-            pdf_file_name = f"Laporan_Evaluasi_{nama_kelas_pdf}.pdf"
-            pdf_bytes = generate_pdf_laporan_kelas(df_view, kelas_filter if kelas_filter != "Semua Kelas" else "Semua Kelas")
+            st.subheader("📄 Download Laporan PDF per Angkatan")
+            report_label = angkatan_filter
+            nama_angkatan_pdf = (
+                angkatan_filter.replace(" ", "_")
+                if angkatan_filter != "Semua Angkatan"
+                else "Semua_Angkatan"
+            )
+            pdf_file_name = f"Laporan_Evaluasi_Angkatan_{nama_angkatan_pdf}.pdf"
+            pdf_bytes = generate_pdf_laporan_kelas(df_view, report_label)
             if pdf_bytes:
                 st.download_button(
                     label="Download Laporan PDF",

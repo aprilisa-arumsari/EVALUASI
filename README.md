@@ -5,8 +5,9 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 ## Fitur
 - Form evaluasi mahasiswa
 - Dashboard laporan prodi untuk admin
-- Filter kelas
-- Export data ke CSV
+- Laporan komprehensif dengan filter angkatan dan rincian per kelas
+- Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
+- Export laporan angkatan ke CSV dan PDF
 - Login admin sederhana
 
 ## Cara Menjalankan
