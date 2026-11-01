@@ -500,13 +500,57 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
     story.append(_tabel_pdf(class_rows, [430, 250]))
     story.append(Spacer(1, 12))
 
+    dosen_per_kelas_matkul = {
+        kelas: {
+            item["matkul"]: item["dosen"]
+            for item in jadwal
+        }
+        for kelas, jadwal in DATA_KELAS_JADWAL.items()
+    }
     method_counts = {}
+    method_graph_counts = {}
     for _, row in df_view.iterrows():
         for matkul, metode in row["Metode Pembelajaran"].items():
-            key = (row["Kelas"], matkul, metode)
+            kelas = row["Kelas"]
+            key = (kelas, matkul, metode)
             method_counts[key] = method_counts.get(key, 0) + 1
+            dosen = dosen_per_kelas_matkul.get(kelas, {}).get(
+                matkul,
+                "Dosen tidak diketahui",
+            )
+            graph_key = (matkul, dosen, metode)
+            method_graph_counts[graph_key] = (
+                method_graph_counts.get(graph_key, 0) + 1
+            )
     story.append(Paragraph("2. Evaluasi Metode Pembelajaran", styles["Heading2"]))
+    if method_graph_counts:
+        story.append(
+            Paragraph(
+                "Ringkasan distribusi per mata kuliah dan dosen",
+                styles["Heading3"],
+            )
+        )
+        graph_rows = [
+            ["Mata Kuliah", "Dosen", "Metode", "Jumlah Respon"]
+        ]
+        graph_rows.extend(
+            [
+                Paragraph(escape(str(matkul)), styles["BodyText"]),
+                Paragraph(escape(str(dosen)), styles["BodyText"]),
+                Paragraph(escape(str(metode)), styles["BodyText"]),
+                str(jumlah),
+            ]
+            for (matkul, dosen, metode), jumlah in sorted(
+                method_graph_counts.items()
+            )
+        )
+        story.append(_tabel_pdf(graph_rows, [150, 170, 310, 60]))
+        story.append(Spacer(1, 8))
+
     if method_counts:
+        story.append(
+            Paragraph("Rincian distribusi per kelas", styles["Heading3"])
+        )
         method_rows = [["Kelas", "Mata Kuliah", "Metode", "Jumlah"]]
         method_rows.extend(
             [
@@ -1035,22 +1079,52 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                     use_container_width=True,
                     hide_index=True,
                 )
+                dosen_per_kelas_matkul = {
+                    kelas: {
+                        item["matkul"]: item["dosen"]
+                        for item in jadwal
+                    }
+                    for kelas, jadwal in DATA_KELAS_JADWAL.items()
+                }
+                hasil_metode_grafik = hasil_metode.copy()
+                hasil_metode_grafik["Mata Kuliah & Dosen"] = (
+                    hasil_metode_grafik.apply(
+                        lambda row: (
+                            f'{row["Mata Kuliah"]} '
+                            f'({dosen_per_kelas_matkul.get(row["Kelas"], {}).get(row["Mata Kuliah"], "Dosen tidak diketahui")})'
+                        ),
+                        axis=1,
+                    )
+                )
+                hasil_metode_grafik = (
+                    hasil_metode_grafik.groupby(
+                        ["Mata Kuliah & Dosen", "Metode Pembelajaran"],
+                        as_index=False,
+                        sort=False,
+                    )["Jumlah Respon"]
+                    .sum()
+                )
                 fig_metode = px.bar(
-                    hasil_metode,
+                    hasil_metode_grafik,
                     x="Jumlah Respon",
-                    y="Mata Kuliah",
+                    y="Mata Kuliah & Dosen",
                     color="Metode Pembelajaran",
                     barmode="group",
                     orientation="h",
                     title="Distribusi Metode Pembelajaran per Mata Kuliah",
                     labels={
                         "Jumlah Respon": "Jumlah Respon",
-                        "Mata Kuliah": "Mata Kuliah",
+                        "Mata Kuliah & Dosen": "Mata Kuliah (Dosen)",
                         "Metode Pembelajaran": "Metode",
                     },
                 )
                 fig_metode.update_layout(
-                    yaxis={"categoryorder": "array", "categoryarray": hasil_metode["Mata Kuliah"].drop_duplicates().tolist()},
+                    yaxis={
+                        "categoryorder": "array",
+                        "categoryarray": hasil_metode_grafik[
+                            "Mata Kuliah & Dosen"
+                        ].drop_duplicates().tolist(),
+                    },
                     legend_title_text="Metode Pembelajaran",
                 )
                 st.plotly_chart(fig_metode, use_container_width=True)
@@ -1058,8 +1132,8 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                     (
                         "metode_pembelajaran",
                         buat_gambar_batang_png(
-                            hasil_metode,
-                            "Mata Kuliah",
+                            hasil_metode_grafik,
+                            "Mata Kuliah & Dosen",
                             "Jumlah Respon",
                             "Metode Pembelajaran",
                             "Distribusi Metode Pembelajaran per Mata Kuliah",
