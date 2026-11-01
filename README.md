@@ -16,8 +16,6 @@ pip install streamlit pandas plotly
 streamlit run EVALUASI.py
 ```
 
-## Admin Login
-Password default: `aprilcantik`
 
 ## Akses
 Buka URL yang ditampilkan oleh Streamlit, biasanya:
