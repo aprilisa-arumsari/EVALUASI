@@ -8,7 +8,7 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 - Laporan komprehensif dengan filter angkatan dan rincian per kelas
 - Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
 - Export laporan angkatan ke CSV dan PDF
-- Penyimpanan otomatis respon ke Supabase
+- Penyimpanan respon ke file CSV lokal
 - Login admin sederhana
 
 ## Cara Menjalankan
@@ -26,36 +26,17 @@ admin tidak akan aktif jika secret belum dikonfigurasi.
 Jangan memasukkan password ke repository atau membagikannya melalui chat.
 
 ## Penyimpanan dan Cadangan Data
-Respon baru disimpan otomatis di Supabase dan dimuat dari database untuk
-dashboard. Untuk menyiapkan tabel:
+Respon disimpan pada file `data_evaluasi.csv` di folder aplikasi. Pada Streamlit
+Cloud, file lokal dapat hilang saat aplikasi dimulai ulang atau diperbarui.
+Karena itu, admin perlu mengunduh **Cadangan Semua Data (CSV)** minimal setiap
+hari saat survei aktif dan sebelum aplikasi diperbarui, lalu menyimpannya di
+lokasi pribadi yang aksesnya dibatasi.
 
-1. Buat project di Supabase.
-2. Buka **SQL Editor → New query**, salin isi [`supabase_setup.sql`](./supabase_setup.sql),
-   lalu jalankan query.
-3. Di **Streamlit Cloud → App settings → Secrets**, tambahkan konfigurasi
-   berikut. Masukkan URL project dan `service_role` key dari Supabase sendiri:
+Tombol cadangan mencakup semua respon, terlepas dari filter angkatan laporan.
+File CSV dapat berisi masukan mahasiswa, jadi jangan membagikannya secara
+publik. Unduhan ini adalah cadangan manual; data tidak otomatis tersimpan di
+penyimpanan permanen.
 
-```toml
-ADMIN_PASSWORD = "isi-sendiri-dengan-password-kuat"
-
-[supabase]
-url = "https://PROJECT_REF.supabase.co"
-service_role_key = "isi-sendiri-dengan-service-role-key"
-```
-
-4. Simpan Secrets, lalu reboot aplikasi Streamlit.
-
-Jangan membagikan atau memasukkan `service_role` key ke repository. Gunakan
-hanya di Secrets server-side Streamlit. Skrip SQL mengaktifkan RLS dan tidak
-memberikan akses tabel kepada `anon` atau `authenticated`; aplikasi memakai
-`service_role` hanya dari Secrets server-side. Aplikasi berhenti dengan pesan
-error jika Supabase belum dikonfigurasi atau database tidak dapat diakses, dan
-tidak akan mengonfirmasi respon berhasil sebelum penyimpanan selesai.
-
-Data lama tidak diimpor otomatis; migrasi dimulai dari respon baru. Tombol
-**Cadangan Semua Data (CSV)** tetap tersedia untuk mengunduh salinan berkala.
-Simpan CSV di lokasi pribadi yang aksesnya dibatasi karena dapat berisi
-masukan mahasiswa.
 ## Akses
 Buka URL yang ditampilkan oleh Streamlit, biasanya:
 
