@@ -639,7 +639,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             st.markdown("---")
             st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa")
             df_komentar = df_view[
-                ["Timestamp", "Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]
+                ["Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]
             ]
             st.dataframe(df_komentar, use_container_width=True, hide_index=True)
 
