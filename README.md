@@ -7,6 +7,7 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 - Dashboard laporan prodi untuk admin
 - Laporan komprehensif dengan filter angkatan dan rincian per kelas
 - Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
+- Laporan PDF dengan tanggal realtime dan ruang pengesahan Dekan serta Ketua Program Studi
 - Unduh semua hasil dalam satu ZIP: CSV, PDF, dan gambar grafik PNG
 - Pulihkan respon dari CSV cadangan atau ZIP hasil unduhan aplikasi
 - Penyimpanan respon di CSV lokal dengan unduhan cadangan manual

@@ -15,9 +15,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import plotly.express as px
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import (
     Image as PdfImage,
+    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -1071,6 +1072,82 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
                 Paragraph("Tidak ada catatan tambahan.", styles["BodyText"])
             )
         story.append(Spacer(1, 8))
+
+    tanggal_laporan = pd.Timestamp.now(tz="Asia/Jakarta")
+    nama_bulan = (
+        "Januari",
+        "Februari",
+        "Maret",
+        "April",
+        "Mei",
+        "Juni",
+        "Juli",
+        "Agustus",
+        "September",
+        "Oktober",
+        "November",
+        "Desember",
+    )
+    tanggal_indonesia = (
+        f"Surakarta, {tanggal_laporan.day} "
+        f"{nama_bulan[tanggal_laporan.month - 1]} {tanggal_laporan.year}"
+    )
+    style_tanda_tangan = ParagraphStyle(
+        "TandaTangan",
+        parent=styles["BodyText"],
+        alignment=1,
+        leading=14,
+    )
+    kolom_pengesahan = [
+        [
+            Paragraph(
+                "Mengetahui,<br/>Dekan Fakultas Ilmu Komputer",
+                style_tanda_tangan,
+            ),
+            Spacer(1, 58),
+            Paragraph(
+                "Eko Purwanto, S.Kom., M.Kom., Ph.D",
+                style_tanda_tangan,
+            ),
+        ],
+        [
+            Paragraph(
+                "Ketua Program Studi<br/>S1 Sistem Informasi",
+                style_tanda_tangan,
+            ),
+            Spacer(1, 58),
+            Paragraph(
+                "Hanifah Permatasari, S.Kom., M.Kom",
+                style_tanda_tangan,
+            ),
+        ],
+    ]
+    tabel_pengesahan = Table(
+        [kolom_pengesahan],
+        colWidths=[340, 340],
+        hAlign="CENTER",
+    )
+    tabel_pengesahan.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(
+        KeepTogether(
+            [
+                Spacer(1, 12),
+                Paragraph(tanggal_indonesia, style_tanda_tangan),
+                Spacer(1, 12),
+                tabel_pengesahan,
+            ]
+        )
+    )
 
     pdf.build(story)
 
