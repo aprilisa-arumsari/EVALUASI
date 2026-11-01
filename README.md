@@ -8,7 +8,7 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 - Laporan komprehensif dengan filter angkatan dan rincian per kelas
 - Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
 - Unduh semua hasil dalam satu ZIP: CSV, PDF, dan gambar grafik PNG
-- Penyimpanan otomatis respon ke Google Sheets agar tetap tersedia setelah aplikasi Streamlit Cloud dimulai ulang
+- Penyimpanan respon di CSV lokal dengan unduhan cadangan manual
 - Login admin sederhana
 
 ## Cara Menjalankan
@@ -26,46 +26,16 @@ admin tidak akan aktif jika secret belum dikonfigurasi.
 Jangan memasukkan password ke repository atau membagikannya melalui chat.
 
 ## Penyimpanan dan Cadangan Data
-Respon disimpan ke tab `Respon` pada Google Spreadsheet, sehingga tidak
-bergantung pada disk sementara Streamlit Cloud dan tetap tersedia setelah
-aplikasi dimulai ulang atau diperbarui.
+Respon disimpan ke `data_evaluasi.csv` di folder aplikasi. Dashboard admin
+menyediakan tombol **Download Semua Hasil (ZIP)** berisi CSV laporan sesuai
+angkatan, cadangan semua respon, PDF, dan gambar grafik PNG. Unduhan CSV
+cadangan seluruh respon juga tersedia secara terpisah.
 
-### Menyiapkan Google Sheets
-1. Buat Google Spreadsheet baru. Tab pertamanya harus bernama `Respon`.
-   Letakkan spreadsheet di folder Drive evaluasi bila diinginkan.
-2. Di Google Cloud Console, aktifkan **Google Sheets API** dan buat **service
-   account**. Buat key JSON untuk service account tersebut.
-3. Buka file JSON, salin alamat `client_email`, lalu bagikan spreadsheet
-   sebagai **Editor** kepada alamat tersebut.
-4. Salin URL spreadsheet dari browser.
-5. Di **Streamlit Cloud → App settings → Secrets**, pertahankan
-   `ADMIN_PASSWORD` yang sudah digunakan dan tambahkan konfigurasi berikut.
-   Ganti URL contoh dengan URL spreadsheet Anda dan tempel seluruh isi file
-   JSON di antara tiga tanda kutip:
-
-```toml
-[google_sheets]
-spreadsheet_id = "https://docs.google.com/spreadsheets/d/ID_SPREADSHEET_ANDA/edit"
-service_account_json = '''PASTE_SELURUH_ISI_FILE_JSON_SERVICE_ACCOUNT'''
-```
-
-Spreadsheet dapat dibuat dari akun Google Anda; aplikasi hanya menambahkan
-respon pada spreadsheet yang dibagikan. Jangan kirim file JSON/key melalui
-chat atau commit ke repository. Aplikasi membuat header tab `Respon` otomatis
-jika tab masih kosong. Aplikasi akan menolak memuat atau menerima respon jika
-spreadsheet atau aksesnya belum siap—agar respon tidak dianggap tersimpan
-padahal belum tersimpan permanen.
-
-Jika spreadsheet masih kosong dan terdapat `data_evaluasi.csv` lokal, aplikasi
-akan memindahkan respon lokal tersebut ke spreadsheet saat pertama dimuat.
-Untuk mengimpor CSV lama yang tersimpan di Drive, impor CSV itu ke tab `Respon`
-sebelum aplikasi pertama kali dijalankan.
-
-Dashboard admin tetap menyediakan tombol **Download Semua Hasil (ZIP)**,
-berisi CSV laporan sesuai angkatan, cadangan semua respon, PDF, dan gambar
-grafik PNG. Simpan cadangan berkala di lokasi pribadi yang aksesnya dibatasi.
-File cadangan dapat berisi masukan mahasiswa; jangan membagikannya secara
-publik.
+**Penting untuk Streamlit Cloud:** penyimpanan lokal tidak permanen dan dapat
+hilang jika aplikasi dimulai ulang atau diperbarui. Karena Anda memilih
+mengunduh sendiri, admin perlu sering mengunduh ZIP/CSV dan menyimpan salinannya
+di perangkat pribadi. File cadangan dapat berisi masukan mahasiswa; jangan
+membagikannya secara publik.
 
 ## Akses
 Buka URL yang ditampilkan oleh Streamlit, biasanya:

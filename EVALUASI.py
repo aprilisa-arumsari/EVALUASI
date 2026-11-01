@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import tempfile
 import zipfile
 from io import BytesIO
 import re
@@ -8,10 +9,6 @@ from xml.sax.saxutils import escape
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
-from google.auth.exceptions import GoogleAuthError
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -44,59 +41,8 @@ if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
     st.error("ADMIN_PASSWORD harus terdiri dari minimal 16 karakter.")
     st.stop()
 
-GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
-GOOGLE_SHEETS_TAB = "Respon"
-GOOGLE_SHEETS_RANGE = f"'{GOOGLE_SHEETS_TAB}'!A1:I"
-GOOGLE_SHEETS_LOCK = threading.Lock()
-
-
-def _ambil_konfigurasi_google_sheets():
-    try:
-        config = st.secrets["google_sheets"]
-        service_account_json = config["service_account_json"]
-        credentials_info = json.loads(service_account_json)
-        spreadsheet_id = str(config["spreadsheet_id"]).strip()
-    except (
-        KeyError,
-        StreamlitSecretNotFoundError,
-        TypeError,
-        json.JSONDecodeError,
-    ) as error:
-        raise RuntimeError(
-            "Atur [google_sheets], spreadsheet_id, dan service_account_json "
-            "di Streamlit Secrets."
-        ) from error
-
-    if not isinstance(credentials_info, dict):
-        raise RuntimeError("service_account_json harus berupa JSON service account.")
-    spreadsheet_url_match = re.search(
-        r"/spreadsheets/d/([^/?#]+)",
-        spreadsheet_id,
-    )
-    if spreadsheet_url_match:
-        spreadsheet_id = spreadsheet_url_match.group(1)
-    if not spreadsheet_id:
-        raise RuntimeError("spreadsheet_id tidak boleh kosong.")
-
-    return credentials_info, spreadsheet_id
-
-
-try:
-    GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEETS_SPREADSHEET_ID = (
-        _ambil_konfigurasi_google_sheets()
-    )
-except RuntimeError as error:
-    st.error(f"Penyimpanan Google Sheets belum siap: {error}")
-    st.stop()
-
-
-@st.cache_resource
-def _google_sheets_service():
-    credentials = Credentials.from_service_account_info(
-        GOOGLE_SHEETS_CREDENTIALS,
-        scopes=[GOOGLE_SHEETS_SCOPE],
-    )
-    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
+DATA_EVALUASI_LOCK = threading.Lock()
 
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
@@ -299,129 +245,47 @@ def _csv_ke_respon(csv_bytes):
     return records
 
 
-def _sheet_baris_respon(data_respon):
-    row = []
-    for column in KOLOM_REPON:
-        value = data_respon.get(column, "")
-        if column in KOLOM_JSON_REPON:
-            value = json.dumps(value, ensure_ascii=False)
-        row.append(value)
-    return row
-
-
-def _sheet_ke_respon(values):
-    records = []
-    for values_row in values[1:]:
-        padded_row = values_row + [""] * (len(KOLOM_REPON) - len(values_row))
-        record = dict(zip(KOLOM_REPON, padded_row))
-        for column in KOLOM_JSON_REPON:
-            value = record[column]
-            if not value:
-                record[column] = {} if column == "Metode Pembelajaran" else []
-                continue
-            try:
-                record[column] = json.loads(value)
-            except (TypeError, ValueError) as error:
-                raise RuntimeError(
-                    f"Isi kolom {column} di Google Sheet bukan JSON yang valid."
-                ) from error
-        records.append(record)
-    return records
-
-
-def _muat_respon_sheet(service):
-    result = (
-        service.spreadsheets()
-        .values()
-        .get(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
-            range=GOOGLE_SHEETS_RANGE,
-        )
-        .execute()
-    )
-    values = result.get("values", [])
-    if not values:
-        service.spreadsheets().values().update(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
-            range=f"'{GOOGLE_SHEETS_TAB}'!A1",
-            valueInputOption="RAW",
-            body={"values": [KOLOM_REPON]},
-        ).execute()
-        return []
-
-    if values[0] != KOLOM_REPON:
-        raise RuntimeError(
-            "Header tab Google Sheet harus sama dengan template "
-            "data_evaluasi_template.csv."
-        )
-    return _sheet_ke_respon(values)
-
-
-def _tambah_respon_sheet(service, data_list):
-    if not data_list:
-        return
-    service.spreadsheets().values().append(
-        spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
-        range=f"'{GOOGLE_SHEETS_TAB}'!A:I",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [_sheet_baris_respon(row) for row in data_list]},
-    ).execute()
-
-
 def _baca_respon_lokal():
-    local_file = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
-    if not os.path.exists(local_file):
+    if not os.path.exists(DATA_EVALUASI_FILE):
         return []
-    with open(local_file, "rb") as csv_file:
+    with open(DATA_EVALUASI_FILE, "rb") as csv_file:
         return _csv_ke_respon(csv_file.read())
-
-
-def _google_api_error(error):
-    if isinstance(error, HttpError):
-        status = getattr(error.resp, "status", "unknown")
-        return RuntimeError(
-            f"Google API mengembalikan HTTP {status}. Periksa izin edit pada "
-            "spreadsheet, Google Sheets API, dan service account."
-        )
-    if isinstance(error, GoogleAuthError):
-        return RuntimeError(
-            "Autentikasi Google gagal. Periksa service account di Secrets."
-        )
-    return RuntimeError(
-        "Google Sheets tidak dapat diakses. Periksa koneksi dan konfigurasi."
-    )
 
 
 def load_respon_evaluasi():
     try:
-        with GOOGLE_SHEETS_LOCK:
-            service = _google_sheets_service()
-            records = _muat_respon_sheet(service)
-            if not records:
-                local_records = _baca_respon_lokal()
-                if local_records:
-                    _tambah_respon_sheet(service, local_records)
-                    return local_records
-            return records
-    except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
-        st.error(
-            f"Gagal memuat respon dari Google Sheets: {_google_api_error(error)}"
-        )
-        st.stop()
-    except RuntimeError as error:
-        st.error(f"Gagal memuat respon dari Google Sheets: {error}")
+        with DATA_EVALUASI_LOCK:
+            return _baca_respon_lokal()
+    except (OSError, UnicodeError, pd.errors.ParserError, ValueError) as error:
+        st.error(f"Gagal memuat respon dari file lokal: {error}")
         st.stop()
 
 
 def simpan_respon_evaluasi(data_respon):
+    temporary_path = None
     try:
-        with GOOGLE_SHEETS_LOCK:
-            service = _google_sheets_service()
-            _muat_respon_sheet(service)
-            _tambah_respon_sheet(service, [data_respon])
-    except (HttpError, GoogleAuthError, OSError, TimeoutError, ValueError) as error:
-        raise _google_api_error(error) from error
+        with DATA_EVALUASI_LOCK:
+            records = _baca_respon_lokal()
+            records.append(data_respon)
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=os.path.dirname(DATA_EVALUASI_FILE),
+                prefix=".data_evaluasi_",
+                suffix=".tmp",
+                delete=False,
+            ) as csv_file:
+                temporary_path = csv_file.name
+                csv_file.write(_csv_respon_bytes(records))
+            os.replace(temporary_path, DATA_EVALUASI_FILE)
+    except (OSError, UnicodeError, pd.errors.ParserError, TypeError, ValueError) as error:
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError as cleanup_error:
+                raise RuntimeError(
+                    "Respon gagal disimpan dan file sementara gagal dibersihkan."
+                ) from cleanup_error
+        raise RuntimeError(f"Respon gagal disimpan ke file lokal: {error}") from error
 
 
 # Inisialisasi Session State
@@ -784,8 +648,8 @@ if mode == "Form Evaluasi Mahasiswa":
                     simpan_respon_evaluasi(data_respon)
                 except (RuntimeError, OSError, TypeError, ValueError) as error:
                     st.error(
-                        "Respon belum tersimpan secara permanen ke Google Sheets. "
-                        f"Periksa koneksi dan konfigurasi, lalu coba kembali. Detail: {error}"
+                        "Respon belum tersimpan ke file lokal. Periksa "
+                        f"akses penyimpanan, lalu coba kembali. Detail: {error}"
                     )
                 else:
                     st.session_state["respon_evaluasi"].append(data_respon)
@@ -1131,8 +995,9 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             st.markdown("#### Cadangan Data Lengkap")
             st.warning(
-                "Data utama tersimpan di Google Sheets. Tetap unduh cadangan secara "
-                "berkala dan simpan di lokasi pribadi yang aksesnya dibatasi."
+                "Data disimpan di file lokal aplikasi. Di Streamlit Cloud, file "
+                "dapat hilang saat aplikasi dimulai ulang atau diperbarui. Unduh "
+                "cadangan sesering mungkin dan simpan di perangkat Anda."
             )
             cadangan_csv = (
                 pd.DataFrame(_siapkan_respon_untuk_csv(respon_list))
