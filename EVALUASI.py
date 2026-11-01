@@ -16,7 +16,14 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    Image as PdfImage,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 # Config Halaman
 st.set_page_config(
@@ -546,6 +553,49 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
         )
         story.append(_tabel_pdf(graph_rows, [150, 170, 310, 60]))
         story.append(Spacer(1, 8))
+
+        grafik_metode_df = pd.DataFrame(
+            [
+                {
+                    "Mata Kuliah & Dosen": f"{matkul} ({dosen})",
+                    "Metode Pembelajaran": metode,
+                    "Jumlah Respon": jumlah,
+                }
+                for (matkul, dosen, metode), jumlah
+                in method_graph_counts.items()
+            ]
+        )
+        kategori_grafik = grafik_metode_df[
+            "Mata Kuliah & Dosen"
+        ].drop_duplicates().tolist()
+        story.append(
+            Paragraph(
+                "Grafik distribusi metode pembelajaran",
+                styles["Heading3"],
+            )
+        )
+        for offset in range(0, len(kategori_grafik), 12):
+            kategori_chunk = kategori_grafik[offset : offset + 12]
+            grafik_chunk = grafik_metode_df[
+                grafik_metode_df["Mata Kuliah & Dosen"].isin(kategori_chunk)
+            ]
+            grafik_bytes = buat_gambar_batang_png(
+                grafik_chunk,
+                "Mata Kuliah & Dosen",
+                "Jumlah Respon",
+                "Metode Pembelajaran",
+                "Distribusi Metode Pembelajaran per Mata Kuliah",
+                horizontal=True,
+            )
+            tinggi_grafik = 680 * max(6, len(kategori_chunk) * 0.45) / 14
+            story.append(
+                PdfImage(
+                    BytesIO(grafik_bytes),
+                    width=680,
+                    height=tinggi_grafik,
+                )
+            )
+            story.append(Spacer(1, 8))
 
     if method_counts:
         story.append(
