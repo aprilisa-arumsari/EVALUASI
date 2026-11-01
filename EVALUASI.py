@@ -29,7 +29,201 @@ from reportlab.platypus import (
 st.set_page_config(
     page_title="Form Evaluasi Pembelajaran S1 Sistem Informasi UDBS",
     page_icon="📋",
-    layout="wide"
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    :root {
+        color-scheme: light;
+        --brand-navy: #17324d;
+        --brand-blue: #2563eb;
+        --brand-teal: #0f766e;
+        --surface: #ffffff;
+        --page-background: #f3f6fb;
+        --border: #dce5ef;
+        --muted: #64748b;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(ellipse at 12% 0%, #e8f1ff 0, transparent 34rem),
+            var(--page-background);
+        color: #23364a;
+    }
+
+    [data-testid="stHeader"] {
+        background: transparent;
+    }
+
+    [data-testid="stMain"] .block-container {
+        max-width: 1440px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #edf4fc 0%, #f8fafc 100%);
+        border-right: 1px solid var(--border);
+    }
+
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #40556c;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] > label {
+        color: var(--brand-navy);
+        font-weight: 700;
+    }
+
+    [data-testid="stSidebar"] [role="radiogroup"] label {
+        padding: 0.55rem 0.7rem;
+        border-radius: 0.7rem;
+        transition: background-color 150ms ease;
+    }
+
+    [data-testid="stSidebar"] [role="radiogroup"] label:hover {
+        background: #e1ebf8;
+    }
+
+    h1, h2, h3 {
+        color: var(--brand-navy);
+        letter-spacing: -0.025em;
+    }
+
+    h1 {
+        font-weight: 800;
+        line-height: 1.2;
+    }
+
+    h2, h3 {
+        font-weight: 700;
+    }
+
+    [data-testid="stCaptionContainer"] {
+        color: var(--muted);
+        line-height: 1.65;
+    }
+
+    [data-testid="stForm"] {
+        padding: clamp(1rem, 3vw, 2rem);
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid var(--border);
+        border-radius: 1.15rem;
+        box-shadow: 0 12px 35px rgba(23, 50, 77, 0.07);
+    }
+
+    [data-testid="stForm"] h3 {
+        margin-top: 0.5rem;
+        padding-bottom: 0.65rem;
+        border-bottom: 2px solid #e8eef6;
+    }
+
+    [data-testid="stForm"] [data-testid="stRadio"] {
+        margin: 0.45rem 0 1rem;
+        padding: 0.75rem 1rem;
+        background: #f8fafc;
+        border: 1px solid #e8eef6;
+        border-radius: 0.8rem;
+    }
+
+    [data-testid="stForm"] [data-testid="stRadio"] label,
+    [data-testid="stForm"] [data-testid="stMultiSelect"] label,
+    [data-testid="stForm"] [data-testid="stTextArea"] label {
+        color: #30465d;
+    }
+
+    [data-baseweb="select"] > div,
+    [data-testid="stTextInput"] input,
+    [data-testid="stTextArea"] textarea {
+        border-color: #cbd8e6;
+        border-radius: 0.7rem;
+        background: #ffffff;
+    }
+
+    [data-baseweb="select"] > div:focus-within,
+    [data-testid="stTextInput"] input:focus,
+    [data-testid="stTextArea"] textarea:focus {
+        border-color: var(--brand-blue);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+    [data-testid="stButton"] button,
+    [data-testid="stFormSubmitButton"] button,
+    [data-testid="stDownloadButton"] button {
+        min-height: 2.7rem;
+        border-radius: 0.7rem;
+        font-weight: 650;
+        transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+
+    [data-testid="stFormSubmitButton"] button,
+    [data-testid="stButton"] button[kind="primary"] {
+        border: 0;
+        color: #ffffff;
+        background: linear-gradient(110deg, var(--brand-blue), var(--brand-teal));
+        box-shadow: 0 5px 14px rgba(37, 99, 235, 0.2);
+    }
+
+    [data-testid="stButton"] button:hover,
+    [data-testid="stFormSubmitButton"] button:hover,
+    [data-testid="stDownloadButton"] button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 7px 18px rgba(23, 50, 77, 0.14);
+    }
+
+    [data-testid="stMetric"] {
+        padding: 1.15rem 1.25rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        box-shadow: 0 8px 24px rgba(23, 50, 77, 0.06);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: var(--muted);
+        font-weight: 600;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: var(--brand-navy);
+        font-weight: 800;
+    }
+
+    [data-testid="stPlotlyChart"],
+    [data-testid="stDataFrame"] {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        background: var(--surface);
+        box-shadow: 0 6px 20px rgba(23, 50, 77, 0.045);
+    }
+
+    [data-testid="stAlert"] {
+        border-radius: 0.85rem;
+    }
+
+    hr {
+        border-color: #dce5ef;
+    }
+
+    @media (max-width: 768px) {
+        [data-testid="stMain"] .block-container {
+            padding: 1.1rem 1rem 2rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+        }
+
+        [data-testid="stForm"] {
+            padding: 1rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 def _ambil_password_admin():
@@ -390,16 +584,22 @@ def buat_gambar_batang_png(
     kelompok,
     judul,
     horizontal=False,
+    show_values=False,
 ):
     if data.empty:
         return b""
 
     kelompok_values = data[kelompok].drop_duplicates().tolist()
     kategori_values = data[kategori].drop_duplicates().tolist()
+    colors = ["#2563EB", "#0F766E", "#F59E0B", "#8B5CF6", "#DB2777"]
     bar_size = 0.8 / len(kelompok_values)
     positions = list(range(len(kategori_values)))
     figure_height = max(6, len(kategori_values) * 0.45) if horizontal else 8
-    figure, axis = plt.subplots(figsize=(14, figure_height))
+    figure, axis = plt.subplots(
+        figsize=(14, figure_height),
+        facecolor="#FFFFFF",
+    )
+    axis.set_facecolor("#FFFFFF")
 
     for index, kelompok_value in enumerate(kelompok_values):
         subset = data[data[kelompok] == kelompok_value]
@@ -410,35 +610,87 @@ def buat_gambar_batang_png(
         offset = (index - (len(kelompok_values) - 1) / 2) * bar_size
         bar_positions = [position + offset for position in positions]
         if horizontal:
-            axis.barh(
+            bars = axis.barh(
                 bar_positions,
                 values,
                 height=bar_size,
                 label=str(kelompok_value),
+                color=colors[index % len(colors)],
+                edgecolor="#FFFFFF",
+                linewidth=0.8,
             )
         else:
-            axis.bar(
+            bars = axis.bar(
                 bar_positions,
                 values,
                 width=bar_size,
                 label=str(kelompok_value),
+                color=colors[index % len(colors)],
+                edgecolor="#FFFFFF",
+                linewidth=0.8,
+            )
+        if show_values:
+            axis.bar_label(
+                bars,
+                labels=[
+                    f"{value:g}" if value else ""
+                    for value in values
+                ],
+                padding=3,
+                fontsize=8,
+                color="#334155",
             )
 
-    axis.set_title(judul)
-    axis.legend(title=kelompok)
+    axis.set_title(
+        judul,
+        fontsize=14,
+        fontweight="bold",
+        color="#17324D",
+        loc="left",
+        pad=18,
+    )
+    if horizontal:
+        axis.legend(
+            title=kelompok,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=min(3, len(kelompok_values)),
+            frameon=False,
+            fontsize=9,
+            title_fontsize=9,
+        )
+    else:
+        axis.legend(
+            title=kelompok,
+            frameon=False,
+            fontsize=9,
+            title_fontsize=9,
+        )
     axis.set_axisbelow(True)
     if horizontal:
         axis.set_yticks(positions, kategori_values)
-        axis.set_xlabel(nilai)
+        axis.set_xlabel(nilai, color="#475569", labelpad=8)
         axis.invert_yaxis()
-        axis.grid(axis="x", alpha=0.25)
+        axis.grid(axis="x", color="#CBD5E1", linestyle="--", alpha=0.65)
+        axis.tick_params(axis="y", labelsize=8, colors="#334155", length=0, pad=8)
+        axis.tick_params(axis="x", labelsize=8, colors="#64748B")
+        for spine in ("top", "right", "left"):
+            axis.spines[spine].set_visible(False)
+        axis.spines["bottom"].set_color("#CBD5E1")
     else:
         axis.set_xticks(positions, kategori_values, rotation=45, ha="right")
-        axis.set_ylabel(nilai)
-        axis.grid(axis="y", alpha=0.25)
+        axis.set_ylabel(nilai, color="#475569", labelpad=8)
+        axis.grid(axis="y", color="#CBD5E1", linestyle="--", alpha=0.65)
+        axis.tick_params(axis="both", labelsize=8, colors="#64748B")
+        for spine in ("top", "right"):
+            axis.spines[spine].set_visible(False)
+        axis.spines["left"].set_color("#CBD5E1")
+        axis.spines["bottom"].set_color("#CBD5E1")
+    if show_values:
+        axis.margins(x=0.16 if horizontal else 0, y=0.08)
 
     buffer = BytesIO()
-    figure.tight_layout()
+    figure.tight_layout(rect=(0, 0, 1, 0.96))
     figure.savefig(buffer, format="png", dpi=160, bbox_inches="tight")
     plt.close(figure)
     return buffer.getvalue()
@@ -557,7 +809,7 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
         grafik_metode_df = pd.DataFrame(
             [
                 {
-                    "Mata Kuliah & Dosen": f"{matkul} ({dosen})",
+                    "Mata Kuliah & Dosen": f"{matkul}\n({dosen})",
                     "Metode Pembelajaran": metode,
                     "Jumlah Respon": jumlah,
                 }
@@ -586,6 +838,7 @@ def generate_pdf_laporan_kelas(df_view, angkatan_label):
                 "Metode Pembelajaran",
                 "Distribusi Metode Pembelajaran per Mata Kuliah",
                 horizontal=True,
+                show_values=True,
             )
             tinggi_grafik = 680 * max(6, len(kategori_chunk) * 0.45) / 14
             story.append(
@@ -741,7 +994,11 @@ if mode == "Form Evaluasi Mahasiswa":
         
         jawaban_metode = {}
         for idx, item in enumerate(list_matkul, start=1):
-            st.write(f"**{idx}. Bagaimana metode pembelajaran yang dilakukan oleh dosen pengampu matakuliah \"{item['matkul']}\" ({item['dosen']})? ***")
+            st.markdown(
+                f"**{idx}. Bagaimana metode pembelajaran yang dilakukan oleh "
+                f"dosen pengampu mata kuliah \"{item['matkul']}\" "
+                f"({item['dosen']})?**"
+            )
             jawaban_metode[item['matkul']] = st.radio(
                 label=f"Opsi {item['matkul']}",
                 options=OPSI_METODE,
@@ -1140,7 +1397,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                 hasil_metode_grafik["Mata Kuliah & Dosen"] = (
                     hasil_metode_grafik.apply(
                         lambda row: (
-                            f'{row["Mata Kuliah"]} '
+                            f'{row["Mata Kuliah"]}\n'
                             f'({dosen_per_kelas_matkul.get(row["Kelas"], {}).get(row["Mata Kuliah"], "Dosen tidak diketahui")})'
                         ),
                         axis=1,
@@ -1188,6 +1445,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                             "Metode Pembelajaran",
                             "Distribusi Metode Pembelajaran per Mata Kuliah",
                             horizontal=True,
+                            show_values=True,
                         ),
                     )
                 )
