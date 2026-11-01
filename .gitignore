@@ -8,6 +8,7 @@ venv/
 .env.*
 .streamlit/
 data_evaluasi.csv
+pengaturan_evaluasi.json
 *.log
 .DS_Store
 Thumbs.db

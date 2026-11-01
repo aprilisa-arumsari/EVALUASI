@@ -3,6 +3,7 @@ import os
 import threading
 import tempfile
 import zipfile
+from datetime import time as datetime_time
 from io import BytesIO
 import re
 from xml.sax.saxutils import escape
@@ -368,7 +369,12 @@ if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
     st.stop()
 
 DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
+PENGATURAN_EVALUASI_FILE = os.path.join(
+    os.path.dirname(__file__),
+    "pengaturan_evaluasi.json",
+)
 DATA_EVALUASI_LOCK = threading.Lock()
+ZONA_WAKTU_EVALUASI = "Asia/Jakarta"
 
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
@@ -684,12 +690,93 @@ def pulihkan_respon_evaluasi(data_respon):
         _tulis_respon_lokal(data_respon)
 
 
+def load_batas_waktu_pengisian():
+    if not os.path.exists(PENGATURAN_EVALUASI_FILE):
+        return None
+
+    try:
+        with open(PENGATURAN_EVALUASI_FILE, "r", encoding="utf-8") as file:
+            pengaturan = json.load(file)
+        nilai_batas = pengaturan["batas_waktu"]
+        if nilai_batas is None:
+            return None
+        batas_waktu = pd.Timestamp(nilai_batas)
+        if batas_waktu.tzinfo is None:
+            raise ValueError("Zona waktu batas pengisian tidak tersedia.")
+        return batas_waktu.tz_convert(ZONA_WAKTU_EVALUASI)
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(
+            f"Batas waktu pengisian tidak dapat dibaca: {error}"
+        ) from error
+
+
+def simpan_batas_waktu_pengisian(batas_waktu):
+    nilai_batas = (
+        batas_waktu.isoformat()
+        if batas_waktu is not None
+        else None
+    )
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=os.path.dirname(PENGATURAN_EVALUASI_FILE),
+            prefix=".pengaturan_evaluasi_",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temporary_path = file.name
+            json.dump({"batas_waktu": nilai_batas}, file)
+        os.replace(temporary_path, PENGATURAN_EVALUASI_FILE)
+    except (OSError, TypeError, ValueError) as error:
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError as cleanup_error:
+                raise RuntimeError(
+                    "Batas waktu gagal disimpan dan file sementara gagal dibersihkan."
+                ) from cleanup_error
+        raise RuntimeError(
+            f"Batas waktu pengisian gagal disimpan: {error}"
+        ) from error
+
+
+def format_batas_waktu_indonesia(batas_waktu):
+    nama_bulan = (
+        "Januari",
+        "Februari",
+        "Maret",
+        "April",
+        "Mei",
+        "Juni",
+        "Juli",
+        "Agustus",
+        "September",
+        "Oktober",
+        "November",
+        "Desember",
+    )
+    return (
+        f"{batas_waktu.day} {nama_bulan[batas_waktu.month - 1]} "
+        f"{batas_waktu.year} pukul {batas_waktu:%H:%M} WIB"
+    )
+
+
 # Inisialisasi Session State
 if "respon_evaluasi" not in st.session_state:
     st.session_state["respon_evaluasi"] = load_respon_evaluasi()
 
 if "admin_logged_in" not in st.session_state:
     st.session_state["admin_logged_in"] = False
+
+try:
+    batas_waktu_pengisian = load_batas_waktu_pengisian()
+except RuntimeError as error:
+    batas_waktu_pengisian = None
+    kesalahan_batas_waktu = str(error)
+else:
+    kesalahan_batas_waktu = None
 
 def _safe_text(value):
     if value is None or pd.isna(value):
@@ -1207,6 +1294,24 @@ st.sidebar.caption("**Fakultas Ilmu Komputer**  \nUniversitas Duta Bangsa Suraka
 # 1. FORM EVALUASI MAHASISWA
 # ==========================================
 if mode == "Form Evaluasi Mahasiswa":
+    if kesalahan_batas_waktu:
+        st.error(
+            f"{kesalahan_batas_waktu} Pengisian dinonaktifkan sampai admin "
+            "memperbaiki pengaturan batas waktu."
+        )
+        st.stop()
+
+    pengisian_ditutup = (
+        batas_waktu_pengisian is not None
+        and pd.Timestamp.now(tz=ZONA_WAKTU_EVALUASI) >= batas_waktu_pengisian
+    )
+    if pengisian_ditutup:
+        st.warning(
+            "Pengisian kuesioner telah ditutup pada "
+            f"{format_batas_waktu_indonesia(batas_waktu_pengisian)}."
+        )
+        st.stop()
+
     st.markdown(
         """
         <section class="app-hero">
@@ -1224,6 +1329,11 @@ if mode == "Form Evaluasi Mahasiswa":
         """,
         unsafe_allow_html=True,
     )
+    if batas_waktu_pengisian is not None:
+        st.info(
+            "Batas akhir pengisian: "
+            f"{format_batas_waktu_indonesia(batas_waktu_pengisian)}."
+        )
 
     # Pilih Kelas Perkuliahan
     with st.container(border=True):
@@ -1301,11 +1411,22 @@ if mode == "Form Evaluasi Mahasiswa":
         submit_btn = st.form_submit_button(" Submit Evaluasi")
 
         if submit_btn:
-            if not harapan_satu_semester or not dosen_favorit:
+            batas_waktu_terbaru = load_batas_waktu_pengisian()
+            waktu_sekarang = pd.Timestamp.now(tz=ZONA_WAKTU_EVALUASI)
+            if (
+                batas_waktu_terbaru is not None
+                and waktu_sekarang >= batas_waktu_terbaru
+            ):
+                st.error(
+                    "Kuesioner sudah ditutup pada "
+                    f"{format_batas_waktu_indonesia(batas_waktu_terbaru)}. "
+                    "Respon Anda belum dikirim."
+                )
+            elif not harapan_satu_semester or not dosen_favorit:
                 st.error("Mohon isi seluruh bidang pertanyaan yang wajib (*).")
             else:
                 data_respon = {
-                    "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Timestamp": waktu_sekarang.strftime("%Y-%m-%d %H:%M:%S"),
                     "Kelas": kelas_terpilih,
                     "Metode Pembelajaran": jawaban_metode,
                     "Dosen GMeet Selalu": gmeet_selalu,
@@ -1376,6 +1497,80 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
             st.rerun()
 
         st.success(" Kredensial Terverifikasi. Selamat Datang Admin.")
+        if kesalahan_batas_waktu:
+            st.error(
+                f"{kesalahan_batas_waktu} Simpan pengaturan di bawah untuk "
+                "memperbaiki konfigurasi."
+            )
+        st.subheader("Batas Waktu Pengisian Kuesioner")
+        batas_aktif = batas_waktu_pengisian is not None
+        if batas_aktif:
+            st.info(
+                "Batas saat ini: "
+                f"{format_batas_waktu_indonesia(batas_waktu_pengisian)}."
+            )
+        else:
+            st.caption("Belum ada batas waktu; kuesioner tetap terbuka.")
+
+        tanggal_default = (
+            batas_waktu_pengisian.date()
+            if batas_aktif
+            else (
+                pd.Timestamp.now(tz=ZONA_WAKTU_EVALUASI)
+                + pd.Timedelta(days=7)
+            ).date()
+        )
+        waktu_default = (
+            batas_waktu_pengisian.time().replace(tzinfo=None)
+            if batas_aktif
+            else datetime_time(23, 59)
+        )
+        with st.form("pengaturan_batas_waktu"):
+            batas_aktif_baru = st.checkbox(
+                "Aktifkan batas akhir pengisian",
+                value=batas_aktif,
+            )
+            kolom_tanggal, kolom_jam = st.columns(2)
+            tanggal_batas = kolom_tanggal.date_input(
+                "Tanggal terakhir (DD/MM/YYYY)",
+                value=tanggal_default,
+                format="DD/MM/YYYY",
+            )
+            jam_batas = kolom_jam.time_input(
+                "Jam terakhir (HH:MM)",
+                value=waktu_default,
+                step=60,
+            )
+            simpan_pengaturan = st.form_submit_button(
+                "Simpan Batas Waktu",
+                type="primary",
+            )
+
+        if simpan_pengaturan:
+            batas_baru = None
+            if batas_aktif_baru:
+                batas_baru = (
+                    pd.Timestamp(tanggal_batas)
+                    .replace(
+                        hour=jam_batas.hour,
+                        minute=jam_batas.minute,
+                        second=0,
+                        microsecond=0,
+                    )
+                    .tz_localize(ZONA_WAKTU_EVALUASI)
+                )
+                if batas_baru <= pd.Timestamp.now(tz=ZONA_WAKTU_EVALUASI):
+                    st.error("Pilih tanggal dan waktu yang masih akan datang.")
+                    st.stop()
+
+            try:
+                simpan_batas_waktu_pengisian(batas_baru)
+            except RuntimeError as error:
+                st.error(str(error))
+            else:
+                st.success("Pengaturan batas waktu berhasil disimpan.")
+                st.rerun()
+
         st.markdown("---")
         
         st.session_state["respon_evaluasi"] = load_respon_evaluasi()

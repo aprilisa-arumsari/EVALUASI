@@ -8,6 +8,7 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 - Laporan komprehensif dengan filter angkatan dan rincian per kelas
 - Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
 - Laporan PDF dengan tanggal realtime dan ruang pengesahan Dekan serta Ketua Program Studi
+- Admin dapat mengatur tanggal dan jam penutupan kuesioner
 - Unduh semua hasil dalam satu ZIP: CSV, PDF, dan gambar grafik PNG
 - Pulihkan respon dari CSV cadangan atau ZIP hasil unduhan aplikasi
 - Penyimpanan respon di CSV lokal dengan unduhan cadangan manual
@@ -29,7 +30,8 @@ Jangan memasukkan password ke repository atau membagikannya melalui chat.
 
 ## Penyimpanan dan Cadangan Data
 Respon disimpan ke `data_evaluasi.csv` di folder aplikasi. Dashboard admin
-menyediakan tombol **Download Semua Hasil (ZIP)** berisi CSV laporan sesuai
+menyediakan pengaturan batas akhir pengisian kuesioner dalam zona waktu WIB,
+serta tombol **Download Semua Hasil (ZIP)** berisi CSV laporan sesuai
 angkatan, cadangan semua respon, PDF, dan gambar grafik PNG. Unduhan CSV
 cadangan seluruh respon juga tersedia secara terpisah.
 
@@ -41,10 +43,10 @@ ini tersimpan; unduh data saat ini terlebih dahulu jika masih ingin
 menyimpannya.
 
 **Penting untuk Streamlit Cloud:** penyimpanan lokal tidak permanen dan dapat
-hilang jika aplikasi dimulai ulang atau diperbarui. Karena Anda memilih
-mengunduh sendiri, admin perlu sering mengunduh ZIP/CSV dan menyimpan salinannya
-di perangkat pribadi. File cadangan dapat berisi masukan mahasiswa; jangan
-membagikannya secara publik.
+hilang jika aplikasi dimulai ulang atau diperbarui. Pengaturan batas waktu juga
+disimpan secara lokal. Karena Anda memilih mengunduh sendiri, admin perlu sering
+mengunduh ZIP/CSV dan menyimpan salinannya di perangkat pribadi. File cadangan
+dapat berisi masukan mahasiswa; jangan membagikannya secara publik.
 
 ## Akses
 Buka URL yang ditampilkan oleh Streamlit, biasanya:
