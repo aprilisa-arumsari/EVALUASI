@@ -638,7 +638,53 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             st.markdown("---")
             st.subheader("💬 Masukan Permasalahan & Harapan Mahasiswa")
-            df_komentar = df_view[
+            kelas_masukan_options = ["Semua Kelas"] + sorted(
+                df_view["Kelas"].dropna().unique().tolist()
+            )
+            kelas_masukan_filter = st.selectbox(
+                "Filter Masukan berdasarkan Kelas:",
+                kelas_masukan_options,
+                key="filter_kelas_masukan",
+            )
+            if kelas_masukan_filter == "Semua Kelas":
+                df_masukan = df_view
+            else:
+                df_masukan = df_view[
+                    df_view["Kelas"] == kelas_masukan_filter
+                ]
+
+            st.markdown("#### A. Metode Pembelajaran Dosen Pengampu")
+            hasil_metode_rows = [
+                {
+                    "Kelas": row["Kelas"],
+                    "Mata Kuliah": matkul,
+                    "Metode Pembelajaran": metode,
+                }
+                for _, row in df_masukan.iterrows()
+                for matkul, metode in row["Metode Pembelajaran"].items()
+            ]
+            if hasil_metode_rows:
+                hasil_metode = (
+                    pd.DataFrame(hasil_metode_rows)
+                    .value_counts(["Kelas", "Mata Kuliah", "Metode Pembelajaran"])
+                    .reset_index(name="Jumlah Respon")
+                    .sort_values(
+                        ["Kelas", "Mata Kuliah", "Jumlah Respon"],
+                        ascending=[True, True, False],
+                    )
+                )
+                st.dataframe(
+                    hasil_metode,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info(
+                    "Belum ada hasil metode pembelajaran untuk kelas ini."
+                )
+
+            st.markdown("#### Harapan dan Catatan Permasalahan")
+            df_komentar = df_masukan[
                 ["Kelas", "Harapan Semester Depan", "Catatan Permasalahan"]
             ]
             st.dataframe(df_komentar, use_container_width=True, hide_index=True)
