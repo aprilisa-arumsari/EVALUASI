@@ -2,6 +2,9 @@ import json
 import os
 from io import BytesIO
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from xml.sax.saxutils import escape
 
 import streamlit as st
@@ -34,6 +37,86 @@ PASSWORD_ADMIN = _ambil_password_admin()
 if PASSWORD_ADMIN and len(PASSWORD_ADMIN) < 16:
     st.error("ADMIN_PASSWORD harus terdiri dari minimal 16 karakter.")
     st.stop()
+
+SUPABASE_TABLE = "respon_evaluasi"
+
+
+def _ambil_konfigurasi_supabase():
+    url = os.getenv("SUPABASE_URL")
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    try:
+        supabase_secrets = st.secrets["supabase"]
+    except (KeyError, StreamlitSecretNotFoundError):
+        supabase_secrets = {}
+
+    if not hasattr(supabase_secrets, "get"):
+        raise RuntimeError(
+            "Bagian [supabase] di Streamlit Secrets harus berisi url dan "
+            "service_role_key."
+        )
+
+    url = url or supabase_secrets.get("url")
+    service_role_key = service_role_key or supabase_secrets.get(
+        "service_role_key"
+    )
+    if not isinstance(url, str) or not isinstance(service_role_key, str):
+        raise RuntimeError(
+            "Atur supabase.url dan supabase.service_role_key di Streamlit "
+            "Secrets sebelum aplikasi digunakan."
+        )
+
+    url = url.strip().rstrip("/")
+    parsed_url = urllib.parse.urlsplit(url)
+    if (
+        parsed_url.scheme != "https"
+        or not parsed_url.netloc
+        or not service_role_key.strip()
+    ):
+        raise RuntimeError(
+            "Konfigurasi Supabase tidak valid. Gunakan URL HTTPS dan service "
+            "role key yang benar."
+        )
+
+    return url, service_role_key.strip()
+
+
+try:
+    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY = _ambil_konfigurasi_supabase()
+except RuntimeError as error:
+    st.error(f"Penyimpanan otomatis belum siap: {error}")
+    st.stop()
+
+
+def _permintaan_supabase(method, params=None, payload=None):
+    endpoint = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
+    if params:
+        endpoint = f"{endpoint}?{urllib.parse.urlencode(params)}"
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload else None
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(
+            f"Supabase mengembalikan HTTP {error.code}. Periksa konfigurasi "
+            "database dan tabel respon."
+        ) from error
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(
+            "Tidak dapat terhubung ke Supabase. Periksa koneksi dan konfigurasi."
+        ) from error
+
 
 # Database Pemetaan Kelas -> Mata Kuliah & Dosen Pengampu dari Jadwal Kuliah FIK UDBS
 DATA_KELAS_JADWAL = {
@@ -179,7 +262,6 @@ OPSI_METODE = [
     "Sering Tidak Masuk Dan Tidak Memberikan Materi"
 ]
 
-DATA_EVALUASI_FILE = os.path.join(os.path.dirname(__file__), "data_evaluasi.csv")
 KOLOM_JSON_REPON = [
     "Metode Pembelajaran",
     "Dosen GMeet Selalu",
@@ -190,27 +272,26 @@ KOLOM_JSON_REPON = [
 
 
 def load_respon_evaluasi():
-    if not os.path.exists(DATA_EVALUASI_FILE):
-        return []
-
     try:
-        df = pd.read_csv(DATA_EVALUASI_FILE)
-        if df.empty:
-            return []
-
-        records = df.to_dict(orient="records")
-        for row in records:
-            for key in KOLOM_JSON_REPON:
-                value = row.get(key)
-                if isinstance(value, str):
-                    try:
-                        row[key] = json.loads(value)
-                    except (TypeError, ValueError):
-                        row[key] = value
-        return records
-    except (OSError, pd.errors.ParserError, UnicodeDecodeError) as error:
-        st.error(f"Gagal membaca data evaluasi dari {DATA_EVALUASI_FILE}: {error}")
+        response_body = _permintaan_supabase(
+            "GET",
+            params={"select": "data", "order": "created_at.asc,id.asc"},
+        )
+        records = json.loads(response_body)
+    except (RuntimeError, json.JSONDecodeError) as error:
+        st.error(f"Gagal memuat respon dari Supabase: {error}")
         st.stop()
+
+    if not isinstance(records, list) or any(
+        not isinstance(record, dict) or not isinstance(record.get("data"), dict)
+        for record in records
+    ):
+        st.error(
+            "Format data Supabase tidak sesuai. Periksa struktur tabel "
+            "respon_evaluasi."
+        )
+        st.stop()
+    return [record["data"] for record in records]
 
 
 def _siapkan_respon_untuk_csv(data_list):
@@ -224,12 +305,11 @@ def _siapkan_respon_untuk_csv(data_list):
     return rows_to_save
 
 
-def simpan_respon_evaluasi(data_list):
-    if not data_list:
-        return
-
-    rows_to_save = _siapkan_respon_untuk_csv(data_list)
-    pd.DataFrame(rows_to_save).to_csv(DATA_EVALUASI_FILE, index=False)
+def simpan_respon_evaluasi(data_respon):
+    _permintaan_supabase(
+        "POST",
+        payload={"data": data_respon},
+    )
 
 
 # Inisialisasi Session State
@@ -497,9 +577,19 @@ if mode == "Form Evaluasi Mahasiswa":
                     "Harapan Semester Depan": harapan_satu_semester,
                     "Catatan Permasalahan": permasalahan_dosen
                 }
-                st.session_state["respon_evaluasi"].append(data_respon)
-                simpan_respon_evaluasi(st.session_state["respon_evaluasi"])
-                st.success(" Respon Anda berhasil dikirim. Terima kasih atas partisipasinya!")
+                try:
+                    simpan_respon_evaluasi(data_respon)
+                except (RuntimeError, TypeError, ValueError) as error:
+                    st.error(
+                        f"Respon belum tersimpan. Periksa koneksi penyimpanan "
+                        f"dan coba kembali. Detail: {error}"
+                    )
+                else:
+                    st.session_state["respon_evaluasi"].append(data_respon)
+                    st.success(
+                        "Respon Anda tersimpan dengan aman. Terima kasih atas "
+                        "partisipasinya!"
+                    )
 
 # ==========================================
 # 2. DASHBOARD LAPORAN PRODI (KHUSUS ADMIN)
@@ -534,6 +624,7 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
         st.success(" Kredensial Terverifikasi. Selamat Datang Admin.")
         st.markdown("---")
         
+        st.session_state["respon_evaluasi"] = load_respon_evaluasi()
         respon_list = st.session_state["respon_evaluasi"]
         
         if not respon_list:
@@ -766,11 +857,9 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
 
             st.markdown("#### Cadangan Data Lengkap")
             st.warning(
-                "Data aplikasi disimpan di file lokal dan bisa hilang saat aplikasi "
-                "di-restart atau diperbarui. Unduh cadangan minimal setiap hari saat "
-                "survei aktif dan sebelum aplikasi diperbarui, simpan "
-                "di lokasi pribadi yang aksesnya terbatas, dan jangan hanya menyimpan "
-                "salinannya di perangkat yang sama."
+                "Respon tersimpan otomatis di Supabase. Unduh cadangan berkala "
+                "sebagai salinan tambahan dan simpan di lokasi pribadi yang "
+                "aksesnya dibatasi."
             )
             cadangan_csv = (
                 pd.DataFrame(_siapkan_respon_untuk_csv(respon_list))
