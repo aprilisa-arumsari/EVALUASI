@@ -678,6 +678,25 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
                     use_container_width=True,
                     hide_index=True,
                 )
+                fig_metode = px.bar(
+                    hasil_metode,
+                    x="Jumlah Respon",
+                    y="Mata Kuliah",
+                    color="Metode Pembelajaran",
+                    barmode="group",
+                    orientation="h",
+                    title="Distribusi Metode Pembelajaran per Mata Kuliah",
+                    labels={
+                        "Jumlah Respon": "Jumlah Respon",
+                        "Mata Kuliah": "Mata Kuliah",
+                        "Metode Pembelajaran": "Metode",
+                    },
+                )
+                fig_metode.update_layout(
+                    yaxis={"categoryorder": "array", "categoryarray": hasil_metode["Mata Kuliah"].drop_duplicates().tolist()},
+                    legend_title_text="Metode Pembelajaran",
+                )
+                st.plotly_chart(fig_metode, use_container_width=True)
             else:
                 st.info(
                     "Belum ada hasil metode pembelajaran untuk kelas ini."
