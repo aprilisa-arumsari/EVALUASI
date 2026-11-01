@@ -245,6 +245,62 @@ def _csv_ke_respon(csv_bytes):
     return records
 
 
+def _baca_cadangan_unggahan(nama_file, file_bytes):
+    if nama_file.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(BytesIO(file_bytes)) as paket:
+                file_bytes = paket.read("data/Cadangan_Semua_Respon.csv")
+        except KeyError as error:
+            raise ValueError(
+                "ZIP tidak berisi data/Cadangan_Semua_Respon.csv."
+            ) from error
+        except (zipfile.BadZipFile, RuntimeError) as error:
+            raise ValueError(f"File ZIP cadangan tidak dapat dibaca: {error}") from error
+
+    try:
+        df = pd.read_csv(BytesIO(file_bytes))
+    except pd.errors.EmptyDataError as error:
+        raise ValueError("File CSV cadangan kosong.") from error
+    except (pd.errors.ParserError, UnicodeError) as error:
+        raise ValueError(f"File CSV cadangan tidak dapat dibaca: {error}") from error
+
+    kolom_hilang = sorted(set(KOLOM_REPON) - set(df.columns))
+    kolom_tambahan = sorted(set(df.columns) - set(KOLOM_REPON))
+    if kolom_hilang or kolom_tambahan:
+        detail = []
+        if kolom_hilang:
+            detail.append(f"kolom yang kurang: {', '.join(kolom_hilang)}")
+        if kolom_tambahan:
+            detail.append(f"kolom yang tidak dikenal: {', '.join(kolom_tambahan)}")
+        raise ValueError(
+            "Format CSV tidak sesuai dengan cadangan aplikasi (" +
+            "; ".join(detail) + ")."
+        )
+    if df.empty:
+        raise ValueError("CSV cadangan tidak berisi respon.")
+
+    records = _csv_ke_respon(file_bytes)
+    kolom_list = KOLOM_JSON_REPON[1:]
+    for nomor_baris, row in enumerate(records, start=2):
+        for key in ("Timestamp", "Kelas"):
+            value = row.get(key)
+            if pd.isna(value) or not str(value).strip():
+                raise ValueError(
+                    f"Kolom {key} kosong pada baris CSV {nomor_baris}."
+                )
+        if not isinstance(row.get("Metode Pembelajaran"), dict):
+            raise ValueError(
+                "Format Metode Pembelajaran tidak valid pada baris CSV "
+                f"{nomor_baris}."
+            )
+        for key in kolom_list:
+            if not isinstance(row.get(key), list):
+                raise ValueError(
+                    f"Format {key} tidak valid pada baris CSV {nomor_baris}."
+                )
+    return records
+
+
 def _baca_respon_lokal():
     if not os.path.exists(DATA_EVALUASI_FILE):
         return []
@@ -261,23 +317,20 @@ def load_respon_evaluasi():
         st.stop()
 
 
-def simpan_respon_evaluasi(data_respon):
+def _tulis_respon_lokal(data_respon):
     temporary_path = None
     try:
-        with DATA_EVALUASI_LOCK:
-            records = _baca_respon_lokal()
-            records.append(data_respon)
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=os.path.dirname(DATA_EVALUASI_FILE),
-                prefix=".data_evaluasi_",
-                suffix=".tmp",
-                delete=False,
-            ) as csv_file:
-                temporary_path = csv_file.name
-                csv_file.write(_csv_respon_bytes(records))
-            os.replace(temporary_path, DATA_EVALUASI_FILE)
-    except (OSError, UnicodeError, pd.errors.ParserError, TypeError, ValueError) as error:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=os.path.dirname(DATA_EVALUASI_FILE),
+            prefix=".data_evaluasi_",
+            suffix=".tmp",
+            delete=False,
+        ) as csv_file:
+            temporary_path = csv_file.name
+            csv_file.write(_csv_respon_bytes(data_respon))
+        os.replace(temporary_path, DATA_EVALUASI_FILE)
+    except (OSError, UnicodeError, TypeError, ValueError) as error:
         if temporary_path and os.path.exists(temporary_path):
             try:
                 os.remove(temporary_path)
@@ -286,6 +339,23 @@ def simpan_respon_evaluasi(data_respon):
                     "Respon gagal disimpan dan file sementara gagal dibersihkan."
                 ) from cleanup_error
         raise RuntimeError(f"Respon gagal disimpan ke file lokal: {error}") from error
+
+
+def simpan_respon_evaluasi(data_respon):
+    try:
+        with DATA_EVALUASI_LOCK:
+            records = _baca_respon_lokal()
+            records.append(data_respon)
+            _tulis_respon_lokal(records)
+    except (OSError, UnicodeError, pd.errors.ParserError, TypeError, ValueError) as error:
+        raise RuntimeError(
+            f"Respon gagal disimpan ke file lokal: {error}"
+        ) from error
+
+
+def pulihkan_respon_evaluasi(data_respon):
+    with DATA_EVALUASI_LOCK:
+        _tulis_respon_lokal(data_respon)
 
 
 # Inisialisasi Session State
@@ -693,6 +763,64 @@ elif mode == "Dashboard Laporan Prodi (Admin)":
         
         st.session_state["respon_evaluasi"] = load_respon_evaluasi()
         respon_list = st.session_state["respon_evaluasi"]
+
+        st.subheader("Pulihkan Data dari Cadangan")
+        st.warning(
+            "Pemulihan akan mengganti semua respon yang saat ini tersimpan. "
+            "Simpan cadangan data saat ini terlebih dahulu jika ingin "
+            "mempertahankannya."
+        )
+        if respon_list:
+            st.download_button(
+                label="Unduh Data Saat Ini sebelum Pemulihan",
+                data=_csv_respon_bytes(respon_list),
+                file_name="Cadangan_Sebelum_Pemulihan.csv",
+                mime="text/csv",
+                key="download_before_restore",
+            )
+
+        file_cadangan = st.file_uploader(
+            "Pilih file CSV cadangan atau ZIP hasil unduhan aplikasi",
+            type=["csv", "zip"],
+            help=(
+                "Untuk ZIP, aplikasi akan memakai "
+                "data/Cadangan_Semua_Respon.csv."
+            ),
+            key="restore_backup_upload",
+        )
+        if file_cadangan is not None:
+            try:
+                respon_cadangan = _baca_cadangan_unggahan(
+                    file_cadangan.name,
+                    file_cadangan.getvalue(),
+                )
+            except ValueError as error:
+                st.error(f"Cadangan tidak dapat dipulihkan: {error}")
+            else:
+                st.info(
+                    f"File berisi {len(respon_cadangan)} respon. "
+                    "Pemulihan akan mengganti seluruh data saat ini."
+                )
+                if st.button(
+                    "Pulihkan dan Ganti Semua Data",
+                    type="primary",
+                    key="restore_backup_button",
+                ):
+                    try:
+                        pulihkan_respon_evaluasi(respon_cadangan)
+                    except (RuntimeError, OSError, TypeError, ValueError) as error:
+                        st.error(
+                            "Data cadangan gagal dipulihkan. "
+                            f"Detail: {error}"
+                        )
+                    else:
+                        respon_list = respon_cadangan
+                        st.session_state["respon_evaluasi"] = respon_cadangan
+                        st.success(
+                            f"Berhasil memulihkan {len(respon_cadangan)} respon."
+                        )
+
+        st.markdown("---")
         
         if not respon_list:
             st.info("Belum ada respon evaluasi yang masuk dari mahasiswa.")

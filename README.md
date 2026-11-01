@@ -8,6 +8,7 @@ Aplikasi evaluasi pembelajaran berbasis Streamlit untuk mengumpulkan respon maha
 - Laporan komprehensif dengan filter angkatan dan rincian per kelas
 - Ringkasan metode pembelajaran, peringkat dosen, Google Meet, dan komentar
 - Unduh semua hasil dalam satu ZIP: CSV, PDF, dan gambar grafik PNG
+- Pulihkan respon dari CSV cadangan atau ZIP hasil unduhan aplikasi
 - Penyimpanan respon di CSV lokal dengan unduhan cadangan manual
 - Login admin sederhana
 
@@ -30,6 +31,13 @@ Respon disimpan ke `data_evaluasi.csv` di folder aplikasi. Dashboard admin
 menyediakan tombol **Download Semua Hasil (ZIP)** berisi CSV laporan sesuai
 angkatan, cadangan semua respon, PDF, dan gambar grafik PNG. Unduhan CSV
 cadangan seluruh respon juga tersedia secara terpisah.
+
+Untuk memulihkan data, buka dashboard admin, unggah CSV cadangan atau ZIP
+hasil unduhan aplikasi, periksa jumlah respon yang terdeteksi, lalu pilih
+**Pulihkan dan Ganti Semua Data**. ZIP harus berisi
+`data/Cadangan_Semua_Respon.csv`. Pemulihan mengganti seluruh respon yang saat
+ini tersimpan; unduh data saat ini terlebih dahulu jika masih ingin
+menyimpannya.
 
 **Penting untuk Streamlit Cloud:** penyimpanan lokal tidak permanen dan dapat
 hilang jika aplikasi dimulai ulang atau diperbarui. Karena Anda memilih
